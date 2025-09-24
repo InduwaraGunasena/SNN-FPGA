@@ -2,47 +2,35 @@ library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.NUMERIC_STD.ALL;
 
--- Simple parameterizable Integrate-and-Fire neuron (7 inputs)
+-- bring in our custom types
+use work.types_pkg.all;
+
 entity neuron is
   generic(
-    W0        : integer := 0;    -- weight for input 0
-    W1        : integer := 0;
-    W2        : integer := 0;
-    W3        : integer := 0;
-    W4        : integer := 0;
-    W5        : integer := 0;
-    W6        : integer := 0;
-    BIAS      : integer := 0;    -- bias term added each timestep
-    V_TH      : integer := 256;  -- firing threshold
-    LEAK      : integer := 0;    -- optional leak per timestep (subtracted)
-    MEM_BITS  : integer := 16    -- bit-width of mem_out (signed)
+    N_INPUTS  : integer := 7;      -- number of inputs
+    V_TH      : integer := 256;    -- firing threshold
+    LEAK      : integer := 0;      -- optional leak per timestep
+    MEM_BITS  : integer := 16      -- bit-width of mem_out (signed)
   );
   port(
-    clk         : in  std_logic;
-    rst         : in  std_logic;   -- synchronous reset (active '1')
-    neuron_reset: in  std_logic;   -- asynchronous per-pixel reset pulse (active '1' for one cycle)
-    sp_0        : in  std_logic;
-    sp_1        : in  std_logic;
-    sp_2        : in  std_logic;
-    sp_3        : in  std_logic;
-    sp_4        : in  std_logic;
-    sp_5        : in  std_logic;
-    sp_6        : in  std_logic;
-    spike_out   : out std_logic;
-    mem_out     : out signed(MEM_BITS-1 downto 0)  -- debug: membrane potential as signed
+    clk          : in  std_logic;
+    rst          : in  std_logic;   -- synchronous reset
+    neuron_reset : in  std_logic;   -- asynchronous per-pixel reset
+    spikes       : in  std_logic_vector(N_INPUTS-1 downto 0);  -- input spikes
+    weights      : in  integer_vector(N_INPUTS-1 downto 0);    -- input weights
+    bias         : in  integer;     -- bias term
+    spike_out    : out std_logic;
+    mem_out      : out signed(MEM_BITS-1 downto 0)
   );
-end entity;
+end entity neuron;
 
 architecture rtl of neuron is
-
-  -- derived constants for saturation limits
   constant MAX_VOLTAGE : integer := 2**(MEM_BITS-1) - 1;
   constant MIN_VOLTAGE : integer := - (2**(MEM_BITS-1));
-
 begin
 
   process(clk)
-    variable voltage : integer := 0; -- membrane potential (variable => immediate update inside process)
+    variable voltage : integer := 0;
     variable sum_in  : integer := 0;
   begin
     if rising_edge(clk) then
@@ -52,19 +40,17 @@ begin
         mem_out <= (others => '0');
       else
         -- compute weighted sum of incoming spikes + bias
-        sum_in := BIAS;
-        if sp_0 = '1' then sum_in := sum_in + W0; end if;
-        if sp_1 = '1' then sum_in := sum_in + W1; end if;
-        if sp_2 = '1' then sum_in := sum_in + W2; end if;
-        if sp_3 = '1' then sum_in := sum_in + W3; end if;
-        if sp_4 = '1' then sum_in := sum_in + W4; end if;
-        if sp_5 = '1' then sum_in := sum_in + W5; end if;
-        if sp_6 = '1' then sum_in := sum_in + W6; end if;
+        sum_in := bias;
+        for i in 0 to N_INPUTS-1 loop
+          if spikes(i) = '1' then
+            sum_in := sum_in + weights(i);
+          end if;
+        end loop;
 
         -- integrate
         voltage := voltage + sum_in;
 
-        -- optional leak (simple model)
+        -- optional leak
         if LEAK /= 0 then
           if voltage > 0 then
             voltage := voltage - LEAK;
@@ -75,7 +61,7 @@ begin
           end if;
         end if;
 
-        -- clamp / saturate to prevent overflow
+        -- clamp
         if voltage > MAX_VOLTAGE then
           voltage := MAX_VOLTAGE;
         elsif voltage < MIN_VOLTAGE then
@@ -87,7 +73,7 @@ begin
           voltage := 0;
         end if;
 
-        -- check threshold and generate spike (subtract threshold to allow bursting)
+        -- check threshold and generate spike
         if voltage >= V_TH then
           voltage := voltage - V_TH;
           spike_out <= '1';
@@ -95,10 +81,9 @@ begin
           spike_out <= '0';
         end if;
 
-        -- output membrane as signed bus for debugging/visibility
         mem_out <= to_signed(voltage, MEM_BITS);
       end if;
     end if;
   end process;
 
-end architecture;
+end architecture rtl;
