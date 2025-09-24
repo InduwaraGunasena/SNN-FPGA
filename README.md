@@ -1,9 +1,4 @@
 # SNN on FPGA
-
-Team members:
-- Induwara Gunasena
-- Ishan Kawshalya
-
 ---
 
 ## **1. Input Layer**
