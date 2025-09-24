@@ -2,117 +2,137 @@ library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.NUMERIC_STD.ALL;
 
+-- use the package that defines integer_vector
+use work.types_pkg.all;
+
 entity tb_neuron is
-end entity;
+end entity tb_neuron;
 
 architecture sim of tb_neuron is
-  signal clk  : std_logic := '0';
-  signal rst  : std_logic := '1';
-  signal nreset : std_logic := '0';
-  signal sp0, sp1, sp2, sp3, sp4, sp5, sp6 : std_logic := '0';
-  signal spike_out : std_logic;
-  signal mem_out : signed(15 downto 0);
 
-  -- instantiate the neuron: set a few example weights
+  constant N_INPUTS : integer := 7;
+  constant MEM_BITS  : integer := 16;
+
+  signal clk    : std_logic := '0';
+  signal rst    : std_logic := '1';
+  signal nreset : std_logic := '0';
+
+  signal spikes    : std_logic_vector(N_INPUTS-1 downto 0) := (others => '0');
+  signal spike_out : std_logic;
+  signal mem_out   : signed(MEM_BITS-1 downto 0);
+
+  -- test weights (index order matches downto: N_INPUTS-1 downto 0)
+  constant W_EX : integer_vector(N_INPUTS-1 downto 0) :=
+    (6 => 0, 5 => 0, 4 => 0, 3 => 0, 2 => 20, 1 => 30, 0 => 50);
+
+  constant BIAS_C : integer := 0;
+
+  -- Component declaration (matches your neuron entity)
   component neuron
     generic(
-      W0 : integer := 0;
-      W1 : integer := 0;
-      W2 : integer := 0;
-      W3 : integer := 0;
-      W4 : integer := 0;
-      W5 : integer := 0;
-      W6 : integer := 0;
-      BIAS : integer := 0;
-      V_TH : integer := 256;
-      LEAK : integer := 0;
+      N_INPUTS : integer := 7;
+      V_TH     : integer := 256;
+      LEAK     : integer := 0;
       MEM_BITS : integer := 16
     );
     port(
-      clk : in std_logic;
-      rst : in std_logic;
-      neuron_reset : in std_logic;
-      sp_0 : in std_logic;
-      sp_1 : in std_logic;
-      sp_2 : in std_logic;
-      sp_3 : in std_logic;
-      sp_4 : in std_logic;
-      sp_5 : in std_logic;
-      sp_6 : in std_logic;
-      spike_out : out std_logic;
-      mem_out : out signed(15 downto 0)
+      clk          : in  std_logic;
+      rst          : in  std_logic;
+      neuron_reset : in  std_logic;
+      spikes       : in  std_logic_vector(N_INPUTS-1 downto 0);
+      weights      : in  integer_vector(N_INPUTS-1 downto 0);
+      bias         : in  integer;
+      spike_out    : out std_logic;
+      mem_out      : out signed(MEM_BITS-1 downto 0)
     );
   end component;
 
 begin
-  -- clock: 10 ns period
+
+  -- clock generator: 10ns period
   clk <= not clk after 5 ns;
 
+  -- Instantiate neuron under test
   UUT: neuron
     generic map(
-      W0 => 50,
-      W1 => 30,
-      W2 => 20,
-      W3 => 0,
-      W4 => 0,
-      W5 => 0,
-      W6 => 0,
-      BIAS => 0,
-      V_TH => 100,
-      LEAK => 0,
-      MEM_BITS => 16
+      N_INPUTS => N_INPUTS,
+      V_TH     => 100,     -- lower threshold for test stimulus
+      LEAK     => 0,
+      MEM_BITS => MEM_BITS
     )
     port map(
-      clk => clk,
-      rst => rst,
+      clk          => clk,
+      rst          => rst,
       neuron_reset => nreset,
-      sp_0 => sp0,
-      sp_1 => sp1,
-      sp_2 => sp2,
-      sp_3 => sp3,
-      sp_4 => sp4,
-      sp_5 => sp5,
-      sp_6 => sp6,
-      spike_out => spike_out,
-      mem_out => mem_out
+      spikes       => spikes,
+      weights      => W_EX,
+      bias         => BIAS_C,
+      spike_out    => spike_out,
+      mem_out      => mem_out
     );
 
-  -- stimulus
+  -- Stimulus process
   stim_proc : process
   begin
-    -- keep reset active for a few clocks
+    -- initial reset
     rst <= '1';
+    nreset <= '0';
     wait for 30 ns;
     rst <= '0';
     wait for 20 ns;
 
-    -- send a few spikes on sp0 and sp1 that should cause firing
-    sp0 <= '1';
+    -- Single spike on input 0 (should integrate but not fire yet)
+    spikes <= (others => '0');
+    spikes(0) <= '1';
     wait for 10 ns;
-    sp0 <= '0';
-    wait for 10 ns;
+    spikes(0) <= '0';
+    wait for 30 ns;
 
-    sp1 <= '1';
+    -- Single spike on input 1
+    spikes(1) <= '1';
     wait for 10 ns;
-    sp1 <= '0';
-    wait for 20 ns;
+    spikes(1) <= '0';
+    wait for 30 ns;
 
-    -- send repeated sp0 pulses to force integration
-    repeat_spikes: for i in 1 to 5 loop
-      sp0 <= '1';
+    -- A sequence of spikes to cause firing:
+    -- repeatedly pulse input0 (weight 50) 3 times -> should exceed V_TH=100
+    for i in 1 to 3 loop
+      spikes <= (others => '0');
+      spikes(0) <= '1';
       wait for 10 ns;
-      sp0 <= '0';
+      spikes(0) <= '0';
       wait for 30 ns;
     end loop;
 
-    -- test neuron_reset (clear membrane)
-    nreset <= '1';
+    -- Another pattern: simultaneous spikes on input0 and input1
+    spikes <= (others => '0');
+    spikes(0) <= '1';
+    spikes(1) <= '1';
+    wait for 10 ns;
+    spikes <= (others => '0');
+    wait for 30 ns;
+
+    -- Test neuron_reset: inject a spike then clear membrane early
+    spikes <= (others => '0');
+    spikes(0) <= '1';
+    wait for 10 ns;
+    spikes <= (others => '0');
+    nreset <= '1';      -- clear membrane
     wait for 10 ns;
     nreset <= '0';
-    wait for 20 ns;
+    wait for 40 ns;
+
+    -- Final burst to ensure another firing event
+    for i in 1 to 4 loop
+      spikes <= (others => '0');
+      spikes(1) <= '1';
+      wait for 10 ns;
+      spikes <= (others => '0');
+      wait for 20 ns;
+    end loop;
 
     -- done
     wait;
-  end process;
+  end process stim_proc;
 
-end architecture;
+end architecture sim;
