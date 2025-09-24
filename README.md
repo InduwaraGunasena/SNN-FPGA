@@ -72,3 +72,70 @@ Team members:
 5. **Display result:** Show digit on 7-segment display.
 
 ---
+
+
+
+
+
+
+## SNN Architecture
+---
+
+### **Input Layer**
+
+* Each pixel is **grayscale 0–255**, which can be represented with **8 bits** (or 7 bits if you ignore the MSB).
+
+* You have **16×16 = 256 pixels**, so **256 input neurons**, one per pixel.
+
+* If you want to encode the pixel value as spikes:
+
+  * You can use **rate coding** or **binary encoding**:
+
+    * **Rate coding:** the pixel value determines how many spikes appear over multiple timesteps.
+    * **Binary coding:** treat the 7 bits of the pixel as separate input spikes per neuron.
+
+* In your case, if your neuron accepts 7 inputs, then each **pixel neuron will have 7 input spikes** representing the 7 bits of that pixel. ✅
+
+* **Output of each input neuron:** 1 spike per timestep (or 0 if no spike).
+
+---
+
+### **Hidden Layer**
+
+* Let’s say **32–64 hidden neurons**.
+
+* Each hidden neuron receives input from **all 256 input neurons**.
+
+* Each hidden neuron has **256 inputs**, each with its own weight. ✅
+
+* Each hidden neuron produces **1 output spike per timestep**.
+
+* Implementation note:
+
+  * Your current neuron module only supports 7 inputs.
+  * For 256 inputs, you can:
+
+    1. **Extend the neuron module** to accept 256 inputs (one big adder tree).
+    2. Or **time-multiplex** inputs: feed 7 inputs per cycle in 37 cycles (37×7≈259).
+
+       * You accumulate the weighted sum in a register over cycles, then generate a spike.
+
+---
+
+### **Output Layer**
+
+* **10 output neurons** (for digits 0–9).
+* Each output neuron receives inputs from **all hidden neurons** (32–64 inputs).
+* Each output neuron has **1 spike output per timestep**.
+
+---
+
+### ✅ **Summary Table**
+
+| Layer  | # Neurons | Inputs per neuron          | Outputs per neuron |
+| ------ | --------- | -------------------------- | ------------------ |
+| Input  | 256       | 7 (bits of pixel)          | 1 spike            |
+| Hidden | 32–64     | 256 (all input neurons)    | 1 spike            |
+| Output | 10        | 32–64 (all hidden neurons) | 1 spike            |
+
+---
