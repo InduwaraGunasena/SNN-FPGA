@@ -16,7 +16,7 @@ entity layer is
     rst          : in  std_logic;
     neuron_reset : in  std_logic;   -- reset applied to all neurons (e.g., per-pixel/frame)
     spikes_in    : in  std_logic_vector(N_INPUTS-1 downto 0); -- inputs from previous layer (or encoder)
-    weights      : in integer_matrix(0 to N_NEURONS-1, 0 to N_INPUTS-1);  -- fully constrained 2D array
+    weights      : in  integer_matrix(0 to N_NEURONS-1, 0 to N_INPUTS-1);  -- fully constrained 2D array
     biases       : in  integer_vector(N_NEURONS-1 downto 0);  -- bias per neuron
     spikes_out   : out std_logic_vector(N_NEURONS-1 downto 0); -- outputs of this layer (spike per neuron)
     mem_outs     : out mem_array(N_NEURONS-1 downto 0)
