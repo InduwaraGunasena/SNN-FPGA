@@ -2,6 +2,7 @@ library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.NUMERIC_STD.ALL;
 use work.types_pkg.all;
+use work.weights_pkg.all;
 
 entity snn_top is
   generic(
@@ -10,7 +11,7 @@ entity snn_top is
     N_HIDDEN   : integer := 32;   -- hidden layer neurons
     N_OUTPUT   : integer := 10;   -- output layer neurons
     -- neuron generics
-    V_TH       : integer := 256;
+    V_TH       : integer := 5;
     LEAK       : integer := 0;
     MEM_BITS   : integer := 16
   );
@@ -38,16 +39,6 @@ architecture rtl of snn_top is
 
   -- Output layer outputs
   signal output_mems   : mem_array(N_OUTPUT-1 downto 0);
-
-  -------------------------------------------------------------------
-  -- Weight and bias storage (constants for now)
-  -------------------------------------------------------------------
-  -- each element weights(n) is an integer_vector(N_INPUTS-1 downto 0) filled with 1s
-  constant W_INPUT_HIDDEN : integer_matrix(0 to N_HIDDEN-1, 0 to N_INPUTS-1) := (others => (others => 1));
-  constant B_INPUT_HIDDEN : integer_vector(N_HIDDEN-1 downto 0) := (others => 0);
-
-  constant W_HIDDEN_OUTPUT : integer_matrix(0 to N_HIDDEN-1, 0 to N_INPUTS-1) := (others => (others => 1));
-  constant B_HIDDEN_OUTPUT : integer_vector(N_OUTPUT-1 downto 0) := (others => 0);
 
 begin
 
