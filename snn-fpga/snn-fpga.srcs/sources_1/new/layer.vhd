@@ -9,14 +9,14 @@ entity layer is
     N_NEURONS  : integer := 32;  -- number of neurons in this layer
     V_TH       : integer := 256;
     LEAK       : integer := 0;
-    MEM_BITS   : integer := 16
+    MEM_BITS   : integer := 16  -- Ensure MEM_BITS matches mem_t width
   );
   port(
     clk          : in  std_logic;
     rst          : in  std_logic;
     neuron_reset : in  std_logic;   -- reset applied to all neurons (e.g., per-pixel/frame)
     spikes_in    : in  std_logic_vector(N_INPUTS-1 downto 0); -- inputs from previous layer (or encoder)
-    weights      : in  integer_matrix(N_NEURONS-1 downto 0);  -- each element is an integer_vector(N_INPUTS-1 downto 0)
+    weights      : in integer_matrix(0 to N_NEURONS-1, 0 to N_INPUTS-1);  -- fully constrained 2D array
     biases       : in  integer_vector(N_NEURONS-1 downto 0);  -- bias per neuron
     spikes_out   : out std_logic_vector(N_NEURONS-1 downto 0); -- outputs of this layer (spike per neuron)
     mem_outs     : out mem_array(N_NEURONS-1 downto 0)
@@ -24,8 +24,22 @@ entity layer is
 end entity;
 
 architecture rtl of layer is
+  type weight_rows_array is array (natural range <>) of integer_vector(0 to N_INPUTS-1);
+
+  signal weights_rows : weight_rows_array(0 to N_NEURONS-1);
+
 begin
-  gen_neurons: for n in 0 to N_NEURONS-1 generate
+
+    gen_neurons: for n in 0 to N_NEURONS-1 generate
+    process(clk, rst, weights)
+    begin
+      if rising_edge(clk) then
+        for i in 0 to N_INPUTS-1 loop
+          weights_rows(n)(i) <= weights(n,i);
+        end loop;
+      end if;
+    end process;
+
     neuron_inst: entity work.neuron
       generic map(
         N_INPUTS => N_INPUTS,
@@ -38,7 +52,7 @@ begin
         rst          => rst,
         neuron_reset => neuron_reset,
         spikes       => spikes_in,
-        weights      => weights(n),
+        weights      => weights_rows(n),
         bias         => biases(n),
         spike_out    => spikes_out(n),
         mem_out      => mem_outs(n)
