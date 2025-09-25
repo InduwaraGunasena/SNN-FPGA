@@ -43,10 +43,10 @@ architecture rtl of snn_top is
   -- Weight and bias storage (constants for now)
   -------------------------------------------------------------------
   -- each element weights(n) is an integer_vector(N_INPUTS-1 downto 0) filled with 1s
-  constant W_INPUT_HIDDEN : integer_matrix(N_HIDDEN-1 downto 0) := (others => (others => 1));
+  constant W_INPUT_HIDDEN : integer_matrix(0 to N_HIDDEN-1, 0 to N_INPUTS-1) := (others => (others => 1));
   constant B_INPUT_HIDDEN : integer_vector(N_HIDDEN-1 downto 0) := (others => 0);
 
-  constant W_HIDDEN_OUTPUT : integer_matrix(N_OUTPUT-1 downto 0) := (others => (others => 1));
+  constant W_HIDDEN_OUTPUT : integer_matrix(0 to N_HIDDEN-1, 0 to N_INPUTS-1) := (others => (others => 1));
   constant B_HIDDEN_OUTPUT : integer_vector(N_OUTPUT-1 downto 0) := (others => 0);
 
 begin
