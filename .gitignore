@@ -3,4 +3,7 @@ snn-fpga/snn-fpga.ip_user_files/
 snn-fpga/snn-fpga.cache/
 snn-fpga/snn-fpga.hw/
 
+snn-fpga/snn-fpga.hw/snn-fpga.lpr
+
 snn-fpga/snn-fpga.xpr
+snn-fpga/snn-fpga.cache/wt/project.wpc
