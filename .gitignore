@@ -8,3 +8,7 @@ snn-fpga/snn-fpga.hw/snn-fpga.lpr
 snn-fpga/snn-fpga.xpr
 snn-fpga/snn-fpga.cache/wt/project.wpc
 model_weights.npz
+
+Python scripts/weights_pkg.vhd
+Python scripts/model_weights_conversion.npz
+Python scripts/model_weights.npz
