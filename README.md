@@ -242,3 +242,37 @@ In short:
 | MEM_BITS  | Enough bits to represent max weighted sum    |
 
 ---
+
+##  A few practical tips / gotchas
+
+* **Clock frequency**: set `CLK_FREQ` correctly to your FPGA system clock (Basys3 default clock often 100 MHz or 74.25 MHz). Wrong `CLK_FREQ` will break baud sampling.
+* **Baud tolerance**: `TICKS_PER_SAMPLE` must be integer. For `CLK_FREQ=100_000_000` and `BAUD=115200`, `TICKS_PER_SAMPLE = 100_000_000 / (115200*16) ≈ 54.25`. Not integer — that creates an issue. You must choose a `CLK_FREQ` such that `CLK_FREQ / (BAUD * OVERSAMP)` is close to integer, or use a fractional baud generator. **Recommendation**:
+
+  * If your board clock is 100 MHz, use `OVERSAMP = 16` and compute `TICKS_PER_SAMPLE` with rounding — but rounding can cause bit sampling drift. Better options:
+
+    * Use `CLK_FREQ = 73_728_000` or `74_250_000` (common video clocks) that may produce integer tick counts for 115200.
+    * Or implement a better baud generator using integer division with remainder (not included here). If you get sampling mismatches, pick a BAUD that divides your clock cleanly or implement fractional divider.
+* **Framing**: If you want more robustness add a start-of-frame marker byte or sequence (e.g., 0xAA 0x55) before 256 bytes; then receiver can resync when noise occurs. Current design assumes Python always sends exactly 256 bytes back-to-back at regular intervals.
+* **Flow control**: If Python is faster than FPGA can process, consider handshaking (e.g., FPGA responds with ACK before Python sends next frame). Current code sends frames periodically — ensure FPGA processes them in time.
+
+---
+
+##  Protocol summary (how it works)
+
+Every frame sent from Python → FPGA is:
+
+```
+[Preamble 0xAA][Preamble 0x55][Payload 256 bytes][Checksum 1 byte]
+```
+
+* `Checksum` = sum(payload) & 0xFF (simple modulo-256 sum).
+* FPGA verifies the checksum. If OK it:
+
+  * latches payload into `frame_data` and pulses `frame_valid` for one clock cycle,
+  * sends 1-byte ACK `0x06` to the host.
+* If checksum fails, FPGA sends NAK `0x15`.
+* The Python sender waits for ACK/NAK (timeout) before continuing next send (so we avoid overflow / popping).
+
+This provides resynchronization (preamble) and corruption detection (checksum), and flow control (ACK).
+
+---
