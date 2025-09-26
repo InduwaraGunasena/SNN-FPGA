@@ -134,3 +134,111 @@
 | Output | 10        | 32–64 (all hidden neurons) | 1 spike            |
 
 ---
+
+you trained your network in Python and now you have **weights and biases**, but your VHDL top entity (`snn_top.vhd`) has other neuron parameters like:
+
+```vhdl
+V_TH    -- neuron threshold
+LEAK    -- membrane leak per cycle
+MEM_BITS -- bit width of neuron membrane potential
+```
+
+These **cannot be directly obtained from training**. You have to choose them based on your FPGA design and how you want the SNN to behave. Let me explain each:
+
+---
+
+### 1️⃣ `V_TH` – neuron threshold
+
+* Determines when a neuron “spikes” in your VHDL model.
+* The value of `V_TH` should roughly match the **scale of your weighted sum of inputs + bias**.
+* Example:
+  Suppose your input spikes are `0` or `1` (binary) and weights are integers from `-128` to `128` (after quantization).
+
+  * Max input to a neuron = sum(weights * spikes_in) + bias.
+  * If your hidden layer neuron has 256 inputs, each weight max 128, max sum = 256*128 = 32768.
+  * You probably **cannot set `V_TH=32768`** because MEM_BITS is only 16. So you need to **scale down weights**.
+* Rule of thumb:
+
+  1. Determine max weighted sum (`max_sum`) from quantized weights.
+  2. Set `V_TH` somewhere in the middle of `0..max_sum` so neuron spikes realistically.
+
+---
+
+### 2️⃣ `LEAK` – membrane decay per cycle
+
+* Determines how fast the membrane potential decays if the neuron doesn’t spike.
+* If you trained your Python network as a **static feedforward MLP**, you probably **don’t need leak**: set `LEAK = 0`.
+* If you want more biologically realistic SNN dynamics, choose a small positive integer (e.g., 1–10) and test.
+
+---
+
+### 3️⃣ `MEM_BITS` – membrane potential bit width
+
+* Determines the range of values your neuron can store.
+* Must be large enough to represent the **scaled sum of inputs** without overflow.
+* Formula:
+
+  ```text
+  MEM_BITS >= ceil(log2(max_weighted_sum))
+  ```
+* Example:
+
+  * Max weighted sum after quantization = 1000 → MEM_BITS >= 10 bits.
+  * Add some safety margin → 16 bits is safe.
+
+---
+
+### ✅ How to determine them practically
+
+1. Load your `model_weights.npz`:
+
+```python
+import numpy as np
+
+data = np.load("model_weights.npz")
+W_input_hidden  = data["W_input_hidden"]
+B_input_hidden  = data["B_input_hidden"]
+W_hidden_output = data["W_hidden_output"]
+B_hidden_output = data["B_hidden_output"]
+```
+
+2. Find max possible input sum for each layer:
+
+```python
+max_hidden_input = np.max(np.sum(np.abs(W_input_hidden), axis=1) + np.abs(B_input_hidden))
+max_output_input = np.max(np.sum(np.abs(W_hidden_output), axis=1) + np.abs(B_hidden_output))
+
+print("Max weighted sum hidden layer:", max_hidden_input)
+print("Max weighted sum output layer:", max_output_input)
+```
+
+3. Choose:
+
+```text
+V_TH_hidden = max_hidden_input / 2  # or 1/4 if you want sparse spikes
+V_TH_output = max_output_input / 2
+LEAK = 0
+MEM_BITS = next_power_of_2(max(max_hidden_input, max_output_input))
+```
+
+`next_power_of_2` can be implemented in Python:
+
+```python
+def next_power_of_2(x):
+    return int(np.ceil(np.log2(x)))
+```
+
+---
+
+In short:
+
+| Parameter | How to set                                   |
+| --------- | -------------------------------------------- |
+| N_INPUTS  | Equals number of features (16x16 = 256)      |
+| N_HIDDEN  | Chosen when designing network (32)           |
+| N_OUTPUT  | Number of classes (10)                       |
+| V_TH      | ~half of max weighted sum after quantization |
+| LEAK      | 0 (if no decay) or small integer             |
+| MEM_BITS  | Enough bits to represent max weighted sum    |
+
+---
