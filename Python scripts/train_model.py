@@ -25,7 +25,7 @@ def load_digits_16x16():
 
     return train_test_split(X, y, test_size=0.2, random_state=42)
 
-def train_and_save(hidden_layer_size=128, max_iter=100):
+def train_and_save(hidden_layer_size=32, max_iter=100):
     """Train the model and save weights and biases."""
     X_train, X_test, y_train, y_test = load_digits_16x16()
 
@@ -55,6 +55,7 @@ def train_and_save(hidden_layer_size=128, max_iter=100):
 
     # Save weights
     np.savez("model_weights.npz",
+             hidden_layer_size=hidden_layer_size,
              W_input_hidden=clf.coefs_[0].T,
              B_input_hidden=clf.intercepts_[0],
              W_hidden_output=clf.coefs_[1].T,
@@ -63,4 +64,4 @@ def train_and_save(hidden_layer_size=128, max_iter=100):
     print("Model weights and biases saved to 'model_weights.npz'.")
 
 if __name__ == "__main__":
-    train_and_save(hidden_layer_size=128, max_iter=100)
+    train_and_save(hidden_layer_size=32, max_iter=100)

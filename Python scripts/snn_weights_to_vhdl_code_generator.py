@@ -1,6 +1,6 @@
 import numpy as np
 
-def write_vhdl_package(W_input_hidden, B_input_hidden, W_hidden_output, B_hidden_output, filename="weights_pkg.vhd"):
+def write_vhdl_package(hidden_layer_size, W_input_hidden, B_input_hidden, W_hidden_output, B_hidden_output, filename="weights_pkg.vhd"):
     """
     Generate a VHDL package file with weight/bias constants for snn_top.vhd.
 
@@ -20,12 +20,28 @@ def write_vhdl_package(W_input_hidden, B_input_hidden, W_hidden_output, B_hidden
     N_OUTPUT, N_HIDDEN2 = W_hidden_output.shape
     assert N_HIDDEN == N_HIDDEN2, "Hidden layer size mismatch!"
 
+    # Compute some suggested values based on quantized weights
+    max_hidden_input = np.max(np.sum(np.abs(W_input_hidden_q), axis=1) + np.abs(B_input_hidden_q))
+    max_output_input = np.max(np.sum(np.abs(W_hidden_output_q), axis=1) + np.abs(B_hidden_output_q))
+
+    V_TH_hidden = int(max_hidden_input // 2)  # example: spike when half-max input reached
+    V_TH_output = int(max_output_input // 2)
+    LEAK = 0
+    MEM_BITS = 16  # or calculate ceil(log2(max(max_hidden_input, max_output_input))) for dynamic sizing
+
+
     with open(filename, "w") as f:
         f.write("library IEEE;\n")
         f.write("use IEEE.STD_LOGIC_1164.ALL;\n")
         f.write("use IEEE.NUMERIC_STD.ALL;\n")
         f.write("use work.types_pkg.all;\n\n")
         f.write("package weights_pkg is\n\n")
+
+        f.write(f"  -- Tunable neuron parameters\n")
+        f.write(f"  constant N_HIDDEN   : integer := {hidden_layer_size};\n")
+        f.write(f"  constant V_TH       : integer := {V_TH_hidden};\n")
+        f.write(f"  constant LEAK       : integer := {LEAK};\n")
+        f.write(f"  constant MEM_BITS   : integer := {MEM_BITS};\n\n")
 
         # W_INPUT_HIDDEN
         f.write(f"  constant W_INPUT_HIDDEN : integer_matrix(0 to {N_HIDDEN-1}, 0 to {N_INPUTS-1}) := (\n")
@@ -75,12 +91,14 @@ if __name__ == "__main__":
     # Load trained model weights
     data = np.load("E:\Programmes\SNN-FPGA\model_weights.npz")
 
-    W_input_hidden  = data["W_input_hidden"]
-    B_input_hidden  = data["B_input_hidden"]
-    W_hidden_output = data["W_hidden_output"]
-    B_hidden_output = data["B_hidden_output"]
+    hidden_layer_size = data["hidden_layer_size"]
+    W_input_hidden    = data["W_input_hidden"]
+    B_input_hidden    = data["B_input_hidden"]
+    W_hidden_output   = data["W_hidden_output"]
+    B_hidden_output   = data["B_hidden_output"]
 
     print("Loaded trained weights:")
+    print(f"Hidden layer size: {hidden_layer_size}")
     print(f"W_input_hidden:  {W_input_hidden.shape}")
     print(f"B_input_hidden:  {B_input_hidden.shape}")
     print(f"W_hidden_output: {W_hidden_output.shape}")
@@ -94,4 +112,10 @@ if __name__ == "__main__":
     B_hidden_output_q = np.round(B_hidden_output * SCALE).astype(int)
 
     # Write VHDL package
-    write_vhdl_package(W_input_hidden_q, B_input_hidden_q, W_hidden_output_q, B_hidden_output_q)
+    write_vhdl_package(
+        hidden_layer_size=hidden_layer_size, 
+        W_input_hidden=W_input_hidden_q, 
+        B_input_hidden=B_input_hidden_q, 
+        W_hidden_output=W_hidden_output_q, 
+        B_hidden_output=B_hidden_output_q
+        )
