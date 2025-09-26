@@ -1,121 +1,228 @@
+# snn_weights_to_vhdl_code_generator.py
+# Reads model_weights_conversion.npz (or falls back to model_weights.npz),
+# quantizes weights to integers (auto scale unless overridden),
+# and writes weights_pkg.vhd into the same folder.
 import numpy as np
+import math
+import os
+import sys
 
-def write_vhdl_package(hidden_layer_size, W_input_hidden, B_input_hidden, W_hidden_output, B_hidden_output, filename="weights_pkg.vhd"):
-    """
-    Generate a VHDL package file with weight/bias constants for snn_top.vhd.
+# ----------------- User-tweakable defaults -----------------
+# Prefer the conversion file produced by the updated train_model.py
+MODEL_FILENAME_PREFERRED = "model_weights_conversion.npz"
+MODEL_FILENAME_FALLBACK  = "model_weights.npz"
+OUT_FILENAME   = "weights_pkg.vhd"     # written to same dir as this script
+MEM_BITS       = 16                    # bits used to store weights/biases (signed)
+SAFETY_MARGIN  = 0.95                  # avoid saturating full range
+# If you want to force a scale, set SCALE_OVERRIDE to a float, otherwise None
+SCALE_OVERRIDE = None                  # e.g. 128.0 or None to auto-compute
+# -----------------------------------------------------------
 
-    Definitions:
-        W_input_hidden : Weight matrix from input to hidden layer
-        B_input_hidden : Bias vector for hidden layer
-        W_hidden_output: Weight matrix from hidden to output layer
-        B_hidden_output: Bias vector for output layer
+def script_dir():
+    try:
+        return os.path.dirname(os.path.realpath(__file__)) or "."
+    except NameError:
+        return "."
 
-    Parameters:
-        W_input_hidden : np.ndarray shape (N_HIDDEN, N_INPUTS)
-        B_input_hidden : np.ndarray shape (N_HIDDEN,)
-        W_hidden_output: np.ndarray shape (N_OUTPUT, N_HIDDEN)
-        B_hidden_output: np.ndarray shape (N_OUTPUT,)
-    """
+def compute_scale_auto(W_list, b_list, bits=16, safety_margin=0.95, signed=True):
+    max_abs = 0.0
+    for W in W_list:
+        if W.size:
+            max_abs = max(max_abs, float(np.max(np.abs(W))))
+    for b in b_list:
+        if b.size:
+            max_abs = max(max_abs, float(np.max(np.abs(b))))
+    if max_abs == 0.0:
+        return 1.0
+    max_int = (2**(bits-1) - 1) if signed else (2**bits - 1)
+    scale = (max_int * safety_margin) / max_abs
+    scale_rounded = float(int(max(1, round(scale))))
+    return scale_rounded
+
+def bits_needed_for_signed_int(x):
+    if x <= 0:
+        return 1
+    return math.ceil(math.log2(x + 1)) + 1
+
+def write_vhdl_package(
+    outpath,
+    W_in_q,
+    B_in_q,
+    W_out_q,
+    B_out_q,
+    scale,
+    mem_bits=16
+):
+    N_HIDDEN, N_INPUTS = W_in_q.shape
+    N_OUTPUT, N_HIDDEN2 = W_out_q.shape
+    assert N_HIDDEN == N_HIDDEN2, "Hidden layer size mismatch"
+
+    max_w = int(max(np.max(np.abs(W_in_q)), np.max(np.abs(W_out_q)), 1))
+    weight_bits = bits_needed_for_signed_int(max_w)
+    acc_bits = weight_bits + math.ceil(math.log2(max(N_INPUTS, N_HIDDEN))) + 2
+
+    max_hidden_input = int(np.max(np.sum(np.abs(W_in_q), axis=1) + np.abs(B_in_q)))
+    max_output_input = int(np.max(np.sum(np.abs(W_out_q), axis=1) + np.abs(B_out_q)))
+    V_TH_hidden = int(max_hidden_input // 2) if max_hidden_input > 0 else 1
+    V_TH_output = int(max_output_input // 2) if max_output_input > 0 else 1
+
+    lines = []
+    lines.append("-- Auto-generated weights package (from snn_weights_to_vhdl_code_generator.py)")
+    lines.append("library IEEE;")
+    lines.append("use IEEE.STD_LOGIC_1164.ALL;")
+    lines.append("use IEEE.NUMERIC_STD.ALL;")
+    lines.append("use work.types_pkg.all;")
+    lines.append("")
+    lines.append("package weights_pkg is")
+    lines.append("")
+    lines.append("  -- Network geometry (auto-generated)")
+    lines.append(f"  constant N_INPUTS : integer := {N_INPUTS};")
+    lines.append(f"  constant N_HIDDEN : integer := {N_HIDDEN};")
+    lines.append(f"  constant N_OUTPUT : integer := {N_OUTPUT};")
+    lines.append("")
+    lines.append("  -- Quantization metadata")
+    lines.append(f"  -- SCALE: multiply float weights by this value to obtain integer representation")
+    lines.append(f"  constant SCALE : real := {float(scale):.6f};")
+    lines.append(f"  constant MEM_BITS : integer := {mem_bits};")
+    lines.append(f"  -- Recommended accumulator bitwidth (host-calculated)")
+    lines.append(f"  constant ACC_BITS : integer := {acc_bits};")
+    lines.append("")
+    lines.append("  -- Recommended thresholds (integer scale)")
+    lines.append(f"  constant V_TH_HIDDEN : integer := {V_TH_hidden};")
+    lines.append(f"  constant V_TH_OUTPUT : integer := {V_TH_output};")
+    lines.append("")
+
+    # W_INPUT_HIDDEN
+    lines.append(f"  constant W_INPUT_HIDDEN : integer_matrix(0 to {N_HIDDEN-1}, 0 to {N_INPUTS-1}) := (")
+    for n in range(N_HIDDEN):
+        row = ", ".join(str(int(x)) for x in W_in_q[n])
+        comma = "," if n < N_HIDDEN - 1 else ""
+        lines.append(f"    {n} => ({row}){comma}")
+    lines.append("  );")
+    lines.append("")
+
+    # B_INPUT_HIDDEN
+    b_hidden_str = ", ".join(str(int(x)) for x in B_in_q)
+    lines.append(f"  constant B_INPUT_HIDDEN : integer_vector(0 to {N_HIDDEN-1}) := ({b_hidden_str});")
+    lines.append("")
+
+    # W_HIDDEN_OUTPUT
+    lines.append(f"  constant W_HIDDEN_OUTPUT : integer_matrix(0 to {N_OUTPUT-1}, 0 to {N_HIDDEN-1}) := (")
+    for n in range(N_OUTPUT):
+        row = ", ".join(str(int(x)) for x in W_out_q[n])
+        comma = "," if n < N_OUTPUT - 1 else ""
+        lines.append(f"    {n} => ({row}){comma}")
+    lines.append("  );")
+    lines.append("")
+
+    # B_HIDDEN_OUTPUT
+    b_output_str = ", ".join(str(int(x)) for x in B_out_q)
+    lines.append(f"  constant B_HIDDEN_OUTPUT : integer_vector(0 to {N_OUTPUT-1}) := ({b_output_str});")
+    lines.append("")
+    lines.append("end package weights_pkg;")
+    lines.append("")
+
+    with open(outpath, "w", newline="\n") as f:
+        f.write("\n".join(lines))
+
+    print(f"[OK] wrote VHDL package: {outpath}")
+    print(f"[INFO] MEM_BITS={mem_bits}, SCALE={scale}, ACC_BITS={acc_bits}")
+    print(f"[INFO] max_hidden_row_sum={max_hidden_input}, V_TH_HIDDEN={V_TH_hidden}")
+    print(f"[INFO] max_output_row_sum={max_output_input}, V_TH_OUTPUT={V_TH_output}")
+
+
+def main():
+    base_dir = script_dir()
+    # try the new conversion filename first, then fallback
+    possible_models = [
+        os.path.join(base_dir, MODEL_FILENAME_PREFERRED),
+        os.path.join(base_dir, MODEL_FILENAME_FALLBACK)
+    ]
+    model_path = None
+    for p in possible_models:
+        if os.path.exists(p):
+            model_path = p
+            break
+
+    if model_path is None:
+        print("[ERROR] no model file found. Place 'model_weights_conversion.npz' or 'model_weights.npz' next to this script.")
+        sys.exit(1)
+
+    out_path   = os.path.join(base_dir, OUT_FILENAME)
+
+    print(f"[INFO] loading model: {model_path}")
+    data = np.load(model_path)
+
+    # Load arrays - flexible with shapes
+    try:
+        hidden_layer_size = int(data["hidden_layer_size"])
+    except Exception:
+        hidden_layer_size = None
+
+    W_input_hidden = data["W_input_hidden"]
+    B_input_hidden = data["B_input_hidden"]
+    W_hidden_output = data["W_hidden_output"]
+    B_hidden_output = data["B_hidden_output"]
+
+    # Ensure W_input_hidden is (N_HIDDEN, N_INPUTS)
+    if hidden_layer_size is not None:
+        if W_input_hidden.shape[0] != hidden_layer_size and W_input_hidden.shape[1] == hidden_layer_size:
+            print("[INFO] transposing W_input_hidden to shape (N_HIDDEN, N_INPUTS)")
+            W_input_hidden = W_input_hidden.T
+
+    if W_input_hidden.ndim != 2:
+        print("[ERROR] unexpected W_input_hidden shape:", W_input_hidden.shape)
+        sys.exit(1)
     N_HIDDEN, N_INPUTS = W_input_hidden.shape
-    N_OUTPUT, N_HIDDEN2 = W_hidden_output.shape
-    assert N_HIDDEN == N_HIDDEN2, "Hidden layer size mismatch!"
 
-    # Compute some suggested values based on quantized weights
-    max_hidden_input = np.max(np.sum(np.abs(W_input_hidden_q), axis=1) + np.abs(B_input_hidden_q))
-    max_output_input = np.max(np.sum(np.abs(W_hidden_output_q), axis=1) + np.abs(B_hidden_output_q))
+    # Ensure W_hidden_output is (N_OUTPUT, N_HIDDEN)
+    if W_hidden_output.ndim == 2 and W_hidden_output.shape[1] != N_HIDDEN and W_hidden_output.shape[0] == N_HIDDEN:
+        print("[INFO] transposing W_hidden_output to shape (N_OUTPUT, N_HIDDEN)")
+        W_hidden_output = W_hidden_output.T
 
-    V_TH_hidden = int(max_hidden_input // 2)  # example: spike when half-max input reached
-    V_TH_output = int(max_output_input // 2)
-    LEAK = 0
-    MEM_BITS = 16  # or calculate ceil(log2(max(max_hidden_input, max_output_input))) for dynamic sizing
+    if W_hidden_output.ndim != 2 or W_hidden_output.shape[1] != N_HIDDEN:
+        print("[ERROR] unexpected W_hidden_output shape:", W_hidden_output.shape, "expected second dim", N_HIDDEN)
+        sys.exit(1)
 
+    N_OUTPUT = W_hidden_output.shape[0]
+    print(f"[INFO] shapes: N_INPUTS={N_INPUTS}, N_HIDDEN={N_HIDDEN}, N_OUTPUT={N_OUTPUT}")
 
-    with open(filename, "w") as f:
-        f.write("library IEEE;\n")
-        f.write("use IEEE.STD_LOGIC_1164.ALL;\n")
-        f.write("use IEEE.NUMERIC_STD.ALL;\n")
-        f.write("use work.types_pkg.all;\n\n")
-        f.write("package weights_pkg is\n\n")
+    # Choose scale
+    if SCALE_OVERRIDE is not None:
+        scale = float(SCALE_OVERRIDE)
+        print(f"[INFO] Using SCALE override = {scale}")
+    else:
+        scale = compute_scale_auto(
+            [W_input_hidden, W_hidden_output],
+            [B_input_hidden, B_hidden_output],
+            bits=MEM_BITS,
+            safety_margin=SAFETY_MARGIN
+        )
+        print(f"[INFO] Auto-computed SCALE = {scale}")
 
-        f.write(f"  -- Tunable neuron parameters\n")
-        f.write(f"  constant N_HIDDEN   : integer := {hidden_layer_size};\n")
-        f.write(f"  constant V_TH       : integer := {V_TH_hidden};\n")
-        f.write(f"  constant LEAK       : integer := {LEAK};\n")
-        f.write(f"  constant MEM_BITS   : integer := {MEM_BITS};\n\n")
+    # Quantize
+    W_in_q  = np.round(W_input_hidden * scale).astype(int)
+    B_in_q  = np.round(B_input_hidden * scale).astype(int)
+    W_out_q = np.round(W_hidden_output * scale).astype(int)
+    B_out_q = np.round(B_hidden_output * scale).astype(int)
 
-        # W_INPUT_HIDDEN
-        f.write(f"  constant W_INPUT_HIDDEN : integer_matrix(0 to {N_HIDDEN-1}, 0 to {N_INPUTS-1}) := (\n")
-        for n in range(N_HIDDEN):
-            row = ", ".join(str(int(x)) for x in W_input_hidden[n])
-            if n < N_HIDDEN - 1:
-                f.write(f"    {n} => ({row}),\n")
-            else:
-                f.write(f"    {n} => ({row})\n")
-        f.write("  );\n\n")
-
-        # B_INPUT_HIDDEN
-        b_hidden_str = ", ".join(str(int(x)) for x in B_input_hidden)
-        f.write(f"  constant B_INPUT_HIDDEN : integer_vector(0 to {N_HIDDEN-1}) := ({b_hidden_str});\n\n")
-
-        # W_HIDDEN_OUTPUT
-        f.write(f"  constant W_HIDDEN_OUTPUT : integer_matrix(0 to {N_OUTPUT-1}, 0 to {N_HIDDEN-1}) := (\n")
-        for n in range(N_OUTPUT):
-            row = ", ".join(str(int(x)) for x in W_hidden_output[n])
-            if n < N_OUTPUT - 1:
-                f.write(f"    {n} => ({row}),\n")
-            else:
-                f.write(f"    {n} => ({row})\n")
-        f.write("  );\n\n")
-
-        # B_HIDDEN_OUTPUT
-        b_output_str = ", ".join(str(int(x)) for x in B_hidden_output)
-        f.write(f"  constant B_HIDDEN_OUTPUT : integer_vector(0 to {N_OUTPUT-1}) := ({b_output_str});\n\n")
-
-        f.write("end package weights_pkg;\n")
-
-    print(f"[OK] Wrote VHDL weights package to {filename}")
-
-
-# ---------------- Example Usage ----------------
-if __name__ == "__main__":
-    # N_INPUTS = 256  # input layer  : 256 pixel values for 16x16 image
-    # N_HIDDEN = 32   # hidden layer : 32 neurons
-    # N_OUTPUT = 10   # output layer : 10 classes for digits 0..9
-
-    # # Example: random weights (replace with trained ones)
-    # W_input_hidden  = np.random.randint(-2, 3, size=(N_HIDDEN, N_INPUTS))   # -2..2
-    # B_input_hidden  = np.random.randint(-1, 2, size=(N_HIDDEN,))
-    # W_hidden_output = np.random.randint(-2, 3, size=(N_OUTPUT, N_HIDDEN))
-    # B_hidden_output = np.random.randint(-1, 2, size=(N_OUTPUT,))
-
-    # Load trained model weights
-    data = np.load("E:\Programmes\SNN-FPGA\model_weights.npz")
-
-    hidden_layer_size = data["hidden_layer_size"]
-    W_input_hidden    = data["W_input_hidden"]
-    B_input_hidden    = data["B_input_hidden"]
-    W_hidden_output   = data["W_hidden_output"]
-    B_hidden_output   = data["B_hidden_output"]
-
-    print("Loaded trained weights:")
-    print(f"Hidden layer size: {hidden_layer_size}")
-    print(f"W_input_hidden:  {W_input_hidden.shape}")
-    print(f"B_input_hidden:  {B_input_hidden.shape}")
-    print(f"W_hidden_output: {W_hidden_output.shape}")
-    print(f"B_hidden_output: {B_hidden_output.shape}")
-
-    # Optional: scale/quantize to integers (VHDL uses integer)
-    SCALE = 128  # tune this factor
-    W_input_hidden_q  = np.round(W_input_hidden * SCALE).astype(int)
-    B_input_hidden_q  = np.round(B_input_hidden * SCALE).astype(int)
-    W_hidden_output_q = np.round(W_hidden_output * SCALE).astype(int)
-    B_hidden_output_q = np.round(B_hidden_output * SCALE).astype(int)
+    # Simple safety checks for overflow
+    max_val = max(
+        int(np.max(np.abs(W_in_q))) if W_in_q.size else 0,
+        int(np.max(np.abs(W_out_q))) if W_out_q.size else 0,
+        int(np.max(np.abs(B_in_q))) if B_in_q.size else 0,
+        int(np.max(np.abs(B_out_q))) if B_out_q.size else 0,
+    )
+    max_int_allowed = 2**(MEM_BITS-1) - 1
+    if max_val > max_int_allowed:
+        print(f"[WARN] quantized values exceed MEM_BITS capacity: max={max_val} > {max_int_allowed}")
+        print("You may want to reduce SCALE or increase MEM_BITS.")
+    else:
+        print(f"[INFO] quantized max abs value = {max_val} fits in {MEM_BITS}-bit signed")
 
     # Write VHDL package
-    write_vhdl_package(
-        hidden_layer_size=hidden_layer_size, 
-        W_input_hidden=W_input_hidden_q, 
-        B_input_hidden=B_input_hidden_q, 
-        W_hidden_output=W_hidden_output_q, 
-        B_hidden_output=B_hidden_output_q
-        )
+    write_vhdl_package(out_path, W_in_q, B_in_q, W_out_q, B_out_q, scale, mem_bits=MEM_BITS)
+
+
+if __name__ == "__main__":
+    main()
