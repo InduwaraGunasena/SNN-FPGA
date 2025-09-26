@@ -8,12 +8,7 @@ entity snn_top is
   generic(
     -- Layer sizes
     N_INPUTS   : integer := 256;  -- input layer neurons (16x16 image pixels)
-    N_HIDDEN   : integer := 32;   -- hidden layer neurons
-    N_OUTPUT   : integer := 10;   -- output layer neurons
-    -- neuron generics
-    V_TH       : integer := 5;
-    LEAK       : integer := 0;
-    MEM_BITS   : integer := 16
+    N_OUTPUT   : integer := 10   -- output layer neurons
   );
   port(
     clk       : in  std_logic;

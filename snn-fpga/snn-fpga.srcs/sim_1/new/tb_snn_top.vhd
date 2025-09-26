@@ -12,11 +12,7 @@ architecture sim of tb_snn_top is
   -- Parameters (match your snn_top generics)
   -------------------------------------------------------------------
   constant N_INPUTS  : integer := 256;
-  constant N_HIDDEN  : integer := 32;
   constant N_OUTPUT  : integer := 10;
-  constant V_TH      : integer := 5;
-  constant LEAK      : integer := 0;
-  constant MEM_BITS  : integer := 16;
 
   -------------------------------------------------------------------
   -- Signals
@@ -35,11 +31,7 @@ begin
   uut: entity work.snn_top
     generic map(
       N_INPUTS  => N_INPUTS,
-      N_HIDDEN  => N_HIDDEN,
-      N_OUTPUT  => N_OUTPUT,
-      V_TH      => V_TH,
-      LEAK      => LEAK,
-      MEM_BITS  => MEM_BITS
+      N_OUTPUT  => N_OUTPUT
     )
     port map(
       clk          => clk,
