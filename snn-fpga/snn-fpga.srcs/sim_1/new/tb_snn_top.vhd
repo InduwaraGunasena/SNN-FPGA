@@ -1,93 +1,78 @@
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.NUMERIC_STD.ALL;
-use work.types_pkg.all;
 
 entity tb_snn_top is
-end entity;
+end;
 
 architecture sim of tb_snn_top is
+  signal clk          : std_logic := '0';
+  signal rst          : std_logic := '1';
+  signal frame_data   : std_logic_vector(8*256-1 downto 0);
+  signal frame_valid  : std_logic := '0';
+  signal result_valid : std_logic;
+  signal digit_out    : std_logic_vector(3 downto 0);
 
-  -------------------------------------------------------------------
-  -- Parameters (match your snn_top generics)
-  -------------------------------------------------------------------
-  constant N_INPUTS  : integer := 256;
-  constant N_OUTPUT  : integer := 10;
-
-  -------------------------------------------------------------------
-  -- Signals
-  -------------------------------------------------------------------
-  signal clk           : std_logic := '0';
-  signal rst           : std_logic := '1';
-  signal global_reset  : std_logic := '0';
-  signal spikes_in     : std_logic_vector(N_INPUTS-1 downto 0) := (others => '0');
-  signal spikes_out    : std_logic_vector(N_OUTPUT-1 downto 0);
-
+  -- clock period
+  constant CLK_PERIOD : time := 10 ns;
 begin
-
-  -------------------------------------------------------------------
-  -- Instantiate the SNN top
-  -------------------------------------------------------------------
+  -- DUT
   uut: entity work.snn_top
-    generic map(
-      N_INPUTS  => N_INPUTS,
-      N_OUTPUT  => N_OUTPUT
-    )
     port map(
       clk          => clk,
       rst          => rst,
-      global_reset => global_reset,
-      spikes_in    => spikes_in,
-      spikes_out   => spikes_out
+      frame_data   => frame_data,
+      frame_valid  => frame_valid,
+      result_valid => result_valid,
+      digit_out    => digit_out
     );
 
-  -------------------------------------------------------------------
-  -- Clock generation
-  -------------------------------------------------------------------
-  clk_process : process
+  -- clock
+  clk_process: process
   begin
-    clk <= '0';
-    wait for 5 ns;
-    clk <= '1';
-    wait for 5 ns;
+    while true loop
+      clk <= '0'; wait for CLK_PERIOD/2;
+      clk <= '1'; wait for CLK_PERIOD/2;
+    end loop;
   end process;
 
-  -------------------------------------------------------------------
-  -- Stimulus process
-  -------------------------------------------------------------------
+  -- stimulus
   stim_proc: process
+    variable img : std_logic_vector(8*256-1 downto 0);
   begin
-    -- Initial reset
+    -- reset
     rst <= '1';
-    wait for 20 ns;
+    wait for 50 ns;
     rst <= '0';
-    wait for 20 ns;
 
-    -- Pulse global reset
-    global_reset <= '1';
-    wait for 10 ns;
-    global_reset <= '0';
-    wait for 10 ns;
+    -- Example "digit 0": all pixels = 200
+    for i in 0 to 255 loop
+      img((i+1)*8-1 downto i*8) := std_logic_vector(to_unsigned(200,8));
+    end loop;
+    frame_data <= img;
+    frame_valid <= '1'; wait for CLK_PERIOD;
+    frame_valid <= '0';
 
-    -- Test 1: single input spike
-    spikes_in <= (others => '0');
-    spikes_in(0) <= '1';
-    wait for 20 ns;
+    -- wait for classification
+    wait until result_valid = '1';
+    report "Predicted digit (should be something like 0): " & integer'image(to_integer(unsigned(digit_out)));
 
-    -- Test 2: multiple spikes
-    spikes_in <= (others => '0');
-    spikes_in(3 downto 0) <= "1111";
-    wait for 20 ns;
+    wait for 100 ns;
 
-    -- Test 3: all spikes
-    spikes_in <= (others => '1');
-    wait for 20 ns;
+    -- Example "digit 1": half dark, half bright
+    for i in 0 to 127 loop
+      img((i+1)*8-1 downto i*8) := std_logic_vector(to_unsigned(20,8));
+    end loop;
+    for i in 128 to 255 loop
+      img((i+1)*8-1 downto i*8) := std_logic_vector(to_unsigned(220,8));
+    end loop;
+    frame_data <= img;
+    frame_valid <= '1'; wait for CLK_PERIOD;
+    frame_valid <= '0';
 
-    -- Test 4: no spikes
-    spikes_in <= (others => '0');
-    wait for 20 ns;
+    wait until result_valid = '1';
+    report "Predicted digit (different pattern): " & integer'image(to_integer(unsigned(digit_out)));
 
-    wait; -- end simulation
+    wait;
   end process;
-
-end architecture;
+end;
