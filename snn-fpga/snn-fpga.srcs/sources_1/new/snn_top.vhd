@@ -1,4 +1,4 @@
--- snn_top.vhd (fixed drivers: single-driver for output_counts & result_valid)
+-- snn_top.vhd
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.NUMERIC_STD.ALL;
@@ -15,10 +15,18 @@ entity snn_top is
   port(
     clk          : in  std_logic;
     rst          : in  std_logic;
-    frame_data   : in  std_logic_vector(8*256-1 downto 0);
+    frame_data   : in  std_logic_vector(8*N_INPUTS-1 downto 0);
     frame_valid  : in  std_logic;
     result_valid : out std_logic;
-    digit_out    : out std_logic_vector(3 downto 0)
+    digit_out    : out std_logic_vector(3 downto 0);
+
+    -- debug outputs
+    dbg_frame_pixels : out std_logic_vector(8*N_INPUTS-1 downto 0); -- intensities as latched from frame_data
+    dbg_input_spikes : out std_logic_vector(N_INPUTS-1 downto 0);   -- one-shot Poisson snapshot at frame latch
+    dbg_hidden_spk   : out std_logic_vector(N_HIDDEN-1 downto 0);  -- spike outputs of hidden layer
+    dbg_hidden_inputs: out integer_vector(0 to N_HIDDEN-1);        -- input sums (pre-threshold) for hidden neurons
+    dbg_output_inputs: out integer_vector(0 to N_OUTPUT-1);        -- input sums (pre-threshold) for output neurons
+    dbg_out_counts   : out integer_vector(0 to N_OUTPUT-1)         -- output spike counts
   );
 end entity;
 
@@ -30,8 +38,6 @@ architecture rtl of snn_top is
   subtype byte_t is unsigned(7 downto 0);
   type byte_array_t is array (natural range <>) of byte_t;
 
-  type out_count_array_t is array (natural range <>) of integer range 0 to 2**31-1;
-
   --------------------------------------------------------------------
   -- signals
   --------------------------------------------------------------------
@@ -39,7 +45,8 @@ architecture rtl of snn_top is
 
   signal hidden_spikes : std_logic_vector(N_HIDDEN-1 downto 0) := (others => '0');
 
-  signal output_counts : out_count_array_t(0 to N_OUTPUT-1);
+  -- use integer_vector for output_counts so we can expose it directly
+  signal output_counts : integer_vector(0 to N_OUTPUT-1);
 
   signal lfsr_reg : std_logic_vector(7 downto 0) := x"AA";
 
@@ -65,6 +72,11 @@ architecture rtl of snn_top is
   signal out_j      : integer range 0 to integer'high := 0;
   signal hidden_k   : integer range 0 to integer'high := 0;
 
+  -- debug internal signals (driven inside)
+  signal dbg_input_spikes_sig : std_logic_vector(N_INPUTS-1 downto 0) := (others => '0');
+  signal dbg_hidden_inputs_sig : integer_vector(0 to N_HIDDEN-1);
+  signal dbg_output_inputs_sig : integer_vector(0 to N_OUTPUT-1);
+
   -- thresholds as signed accumulator width
   constant VTH_HIDDEN_ACC : acc_t := to_signed(V_TH_HIDDEN, ACC_BITS_C);
   constant VTH_OUTPUT_ACC : acc_t := to_signed(V_TH_OUTPUT, ACC_BITS_C);
@@ -72,7 +84,7 @@ architecture rtl of snn_top is
 begin
 
   --------------------------------------------------------------------
-  -- LFSR RNG (8-bit)
+  -- LFSR RNG (8-bit, advances each clk)
   --------------------------------------------------------------------
   process(clk)
   begin
@@ -87,40 +99,61 @@ begin
 
   --------------------------------------------------------------------
   -- Unpack incoming frame bytes (frame_valid latches the frame into frame_mem)
-  -- This process ONLY writes frame_mem and pulses start_frame (single driver).
+  -- Also create a one-shot dbg_input_spikes_sig snapshot (debug-only)
   --------------------------------------------------------------------
   process(clk)
-    variable tmp : std_logic_vector(frame_data'range);
-    variable idx_lo : integer;
-    variable idx_hi : integer;
-    variable b : integer;
+    variable tmp     : std_logic_vector(frame_data'range);
+    variable idx_lo  : integer;
+    variable idx_hi  : integer;
+    variable b       : integer;
+    variable rnd_var : std_logic_vector(7 downto 0);
+    variable fb      : std_logic;
   begin
     if rising_edge(clk) then
       if rst = '1' then
         for i in 0 to N_INPUTS-1 loop
           frame_mem(i) <= (others => '0');
+          dbg_input_spikes_sig(i) <= '0';
         end loop;
         start_frame <= '0';
       else
-        start_frame <= '0';  -- default: not starting
+        start_frame <= '0';
         if frame_valid = '1' then
+          -- latch whole frame into frame_mem
           tmp := frame_data;
           for b in 0 to N_INPUTS-1 loop
             idx_lo := b*8;
             idx_hi := idx_lo + 7;
             frame_mem(b) <= unsigned(tmp(idx_hi downto idx_lo));
           end loop;
-          -- pulse start_frame; main FSM will handle clearing counts and starting work
+
+          -- produce a debug snapshot of Poisson spikes (one sampling across all inputs).
+          -- initialize rnd_var from the current LFSR register (std_logic_vector)
+          rnd_var := lfsr_reg;
+
+          for b in 0 to N_INPUTS-1 loop
+            -- one-step 8-bit LFSR: feedback = xor of taps [7,5,4,3]
+            fb := rnd_var(7) xor rnd_var(5) xor rnd_var(4) xor rnd_var(3);
+            -- shift left and insert feedback as LSB (same direction as your main LFSR)
+            rnd_var := rnd_var(6 downto 0) & fb;
+            -- compare numeric rnd to intensity (frame_mem is unsigned)
+            if to_integer(unsigned(rnd_var)) < to_integer(frame_mem(b)) then
+              dbg_input_spikes_sig(b) <= '1';
+            else
+              dbg_input_spikes_sig(b) <= '0';
+            end if;
+          end loop;
+
+          -- pulse start_frame for FSM
           start_frame <= '1';
         end if;
       end if;
     end if;
   end process;
 
+
   --------------------------------------------------------------------
-  -- Main serial FSM: Hidden layer streaming, then output layer streaming,
-  -- repeated for T_STEPS. This process is the ONLY driver for output_counts
-  -- and result_valid.
+  -- Main serial FSM (keeps original behaviour)
   --------------------------------------------------------------------
   process(clk)
     -- locals used as variables (preserved between cycles)
@@ -150,8 +183,10 @@ begin
         acc_var := (others => '0');
         best_i_var := 0;
         best_v_var := -1;
+        -- clear debug arrays
+        for i in 0 to N_HIDDEN-1 loop dbg_hidden_inputs_sig(i) <= 0; end loop;
+        for j in 0 to N_OUTPUT-1 loop dbg_output_inputs_sig(j) <= 0; end loop;
       else
-        -- If a new frame arrived, initialize/clear counters and start
         if start_frame = '1' and state = IDLE then
           for i in 0 to N_OUTPUT-1 loop
             output_counts(i) <= 0;
@@ -167,7 +202,6 @@ begin
           state <= TIMESTEP_START;
         else
           case state is
-
             when IDLE =>
               null;
 
@@ -178,10 +212,10 @@ begin
               state <= HIDDEN_STREAM;
 
             when HIDDEN_STREAM =>
+              -- serially stream inputs into an accumulator for neuron neuron_i
               w_int_var := W_INPUT_HIDDEN(neuron_i, input_i);
               intensity_var := frame_mem(input_i);
-              rand8_var := unsigned(lfsr_reg);
-
+              rand8_var := unsigned(lfsr_reg); -- sample RNG (note: lfsr_reg changes only each clock)
               if to_integer(rand8_var) < to_integer(intensity_var) then
                 acc_var := acc_var + to_signed(w_int_var, ACC_BITS_C);
               end if;
@@ -195,6 +229,9 @@ begin
             when HIDDEN_COMMIT =>
               bias_int_var := B_INPUT_HIDDEN(neuron_i);
               acc_var := acc_var + to_signed(bias_int_var, ACC_BITS_C);
+
+              -- record the pre-threshold input sum (debug)
+              dbg_hidden_inputs_sig(neuron_i) <= to_integer(acc_var);
 
               if acc_var >= VTH_HIDDEN_ACC then
                 hidden_spikes(neuron_i) <= '1';
@@ -230,6 +267,9 @@ begin
               bias_int_var := B_HIDDEN_OUTPUT(out_j);
               acc_var := acc_var + to_signed(bias_int_var, ACC_BITS_C);
 
+              -- record pre-threshold output input sum (debug)
+              dbg_output_inputs_sig(out_j) <= to_integer(acc_var);
+
               if acc_var >= VTH_OUTPUT_ACC then
                 output_counts(out_j) <= output_counts(out_j) + 1;
                 acc_var := acc_var - VTH_OUTPUT_ACC;
@@ -258,6 +298,7 @@ begin
               end if;
 
             when DONE =>
+              -- choose argmax over output_counts
               best_i_var := 0;
               best_v_var := -1;
               for k_var in 0 to N_OUTPUT-1 loop
@@ -282,4 +323,15 @@ begin
     end if;
   end process;
 
+  --------------------------------------------------------------------
+  -- Debug output port wiring (combinational)
+  --------------------------------------------------------------------
+  dbg_frame_pixels <= frame_data;
+  dbg_input_spikes <= dbg_input_spikes_sig;
+  dbg_hidden_spk   <= hidden_spikes;
+  dbg_hidden_inputs<= dbg_hidden_inputs_sig;
+  dbg_output_inputs<= dbg_output_inputs_sig;
+  dbg_out_counts   <= output_counts;
+
 end architecture;
+

@@ -1,6 +1,8 @@
+-- tb_snn_top.vhd
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.NUMERIC_STD.ALL;
+use work.types_pkg.all;  -- for integer_vector
 
 entity tb_snn_top is
 end;
@@ -13,18 +15,38 @@ architecture sim of tb_snn_top is
   signal result_valid : std_logic;
   signal digit_out    : std_logic_vector(3 downto 0);
 
+  -- debug signals (matching snn_top ports)
+  signal dbg_frame_pixels : std_logic_vector(8*256-1 downto 0);
+  signal dbg_input_spikes : std_logic_vector(255 downto 0);
+  signal dbg_hidden_spk   : std_logic_vector(31 downto 0); -- N_HIDDEN=32
+  signal dbg_hidden_inputs: integer_vector(0 to 31);
+  signal dbg_output_inputs: integer_vector(0 to 9);
+  signal dbg_out_counts   : integer_vector(0 to 9);
+
   -- clock period
   constant CLK_PERIOD : time := 10 ns;
 begin
-  -- DUT
+  -- DUT (use the debug build filename / entity)
   uut: entity work.snn_top
+    generic map(
+        N_INPUTS => 256,
+        N_HIDDEN => 32,
+        N_OUTPUT => 10,
+        T_STEPS  => 50
+    )
     port map(
       clk          => clk,
       rst          => rst,
       frame_data   => frame_data,
       frame_valid  => frame_valid,
       result_valid => result_valid,
-      digit_out    => digit_out
+      digit_out    => digit_out,
+      dbg_frame_pixels => dbg_frame_pixels,
+      dbg_input_spikes => dbg_input_spikes,
+      dbg_hidden_spk   => dbg_hidden_spk,
+      dbg_hidden_inputs=> dbg_hidden_inputs,
+      dbg_output_inputs=> dbg_output_inputs,
+      dbg_out_counts   => dbg_out_counts
     );
 
   -- clock
@@ -36,16 +58,17 @@ begin
     end loop;
   end process;
 
-  -- stimulus
-stim_proc: process
-      -- flat image buffer
-      variable img : std_logic_vector(8*256-1 downto 0);
-      
-      -- byte array type for MNIST image
-      type byte_array_t is array (0 to 255) of std_logic_vector(7 downto 0);
-      
-      -- example MNIST digit 6 (replace the hex values with your own)
-      constant img_digit2 : byte_array_t := (
+  -- stimulus: load images, pulse frame_valid, print debug snapshots
+  stim_proc: process
+    -- flat image buffer
+    variable img : std_logic_vector(8*256-1 downto 0);
+
+    -- byte array type for MNIST image
+    type byte_array_t is array (0 to 255) of std_logic_vector(7 downto 0);
+
+    -- example images (shortened in this snippet; use your data)
+    constant img_digit2 : byte_array_t := (
+--      others => x"00"
           0 => x"00", 1 => x"00", 2 => x"00", 3 => x"00", 4 => x"00", 5 => x"00", 6 => x"00", 7 => x"06", 8 => x"04", 9 => x"00", 10 => x"00", 
           11 => x"00", 12 => x"00", 13 => x"00", 14 => x"00", 15 => x"00", 16 => x"00", 17 => x"00", 18 => x"00", 19 => x"00", 20 => x"00", 
           21 => x"00", 22 => x"0D", 23 => x"79", 24 => x"49", 25 => x"00", 26 => x"00", 27 => x"00", 28 => x"00", 29 => x"00", 30 => x"00", 
@@ -71,11 +94,11 @@ stim_proc: process
           221 => x"00", 222 => x"00", 223 => x"00", 224 => x"00", 225 => x"00", 226 => x"00", 227 => x"00", 228 => x"00", 229 => x"00", 230 => x"00", 
           231 => x"00", 232 => x"00", 233 => x"00", 234 => x"00", 235 => x"00", 236 => x"00", 237 => x"00", 238 => x"00", 239 => x"00", 240 => x"00", 
           241 => x"00", 242 => x"00", 243 => x"00", 244 => x"00", 245 => x"00", 246 => x"00", 247 => x"00", 248 => x"00", 249 => x"00", 250 => x"00", 
-          251 => x"00", 252 => x"00", 253 => x"00", 254 => x"00", 255 => x"00"
-      );
-      
-      -- another MNIST digit 3
-      constant img_digit3 : byte_array_t := (
+          251 => x"00", 252 => x"00", 253 => x"00", 254 => x"00", 255 => x"00"   
+    );
+
+    constant img_digit3 : byte_array_t := (
+--      others => x"00"
           0 => x"00", 1 => x"00", 2 => x"00", 3 => x"00", 4 => x"00", 5 => x"00", 6 => x"00", 7 => x"00", 8 => x"00", 9 => x"00", 10 => x"00", 
           11 => x"00", 12 => x"00", 13 => x"00", 14 => x"00", 15 => x"00", 16 => x"00", 17 => x"00", 18 => x"00", 19 => x"00", 20 => x"00", 
           21 => x"00", 22 => x"00", 23 => x"00", 24 => x"00", 25 => x"00", 26 => x"00", 27 => x"00", 28 => x"00", 29 => x"00", 30 => x"00", 
@@ -101,48 +124,80 @@ stim_proc: process
           221 => x"00", 222 => x"00", 223 => x"00", 224 => x"00", 225 => x"00", 226 => x"00", 227 => x"00", 228 => x"00", 229 => x"00", 230 => x"00", 
           231 => x"00", 232 => x"00", 233 => x"00", 234 => x"00", 235 => x"00", 236 => x"00", 237 => x"00", 238 => x"00", 239 => x"00", 240 => x"00", 
           241 => x"00", 242 => x"00", 243 => x"00", 244 => x"00", 245 => x"00", 246 => x"00", 247 => x"00", 248 => x"00", 249 => x"00", 250 => x"00", 
-          251 => x"00", 252 => x"00", 253 => x"00", 254 => x"00", 255 => x"00"
-      );
-      
-  begin
-      -- reset
-      rst <= '1';
-      wait for 50 ns;
-      rst <= '0';
-  
-      -- --- digit 2 ---
-      for i in 0 to 255 loop
-          img((i+1)*8-1 downto i*8) := img_digit2(i);
-      end loop;
-      frame_data <= img;
-      
-      -- keep frame_valid high for several clocks
-      frame_valid <= '1';
-      wait for 200*CLK_PERIOD;  -- ~10 clock cycles, adjust to your DUT
-      frame_valid <= '0';
-      
-      -- wait until DUT produces result
-      wait until result_valid = '1';
-      report "Predicted digit (digit 2): " & integer'image(to_integer(unsigned(digit_out)));
-  
-      wait for 1000 us;
-  
-      -- --- digit 3 ---
-      for i in 0 to 255 loop
-          img((i+1)*8-1 downto i*8) := img_digit3(i);
-      end loop;
-      frame_data <= img;
-      
-      -- keep frame_valid high for several clocks
-      frame_valid <= '1';
-      wait for 200*CLK_PERIOD;  -- ~10 clock cycles, adjust to your DUT
-      frame_valid <= '0';
+          251 => x"00", 252 => x"00", 253 => x"00", 254 => x"00", 255 => x"00"   
+    );
 
-      -- wait until DUT produces result
-      wait until result_valid = '1';
-      report "Predicted digit (digit 3): " & integer'image(to_integer(unsigned(digit_out)));
-  
-      -- wait long enough for DUT to finish
-      wait for 1000 us;  -- 500 microseconds
-    end process;
-end;
+    -- local loop index
+    variable i : integer;
+    variable j : integer;
+  begin
+    -- reset
+    rst <= '1';
+    wait for 50 ns;
+    rst <= '0';
+    wait for CLK_PERIOD;
+
+    -- --- send digit 2 ---
+    -- pack the 256 bytes into frame_data
+    for i in 0 to 255 loop
+      img((i+1)*8-1 downto i*8) := img_digit2(i);
+    end loop;
+    frame_data <= img;
+
+    -- pulse frame_valid for a few clocks
+    frame_valid <= '1';
+    wait for 10*CLK_PERIOD;
+    frame_valid <= '0';
+
+    -- wait for the DUT to process and assert result_valid
+    wait until result_valid = '1';
+    report "Predicted digit (digit 2): " & integer'image(to_integer(unsigned(digit_out)));
+
+    -- print some debug info: pixels[0..15], input spikes[0..15], hidden inputs[0..7], output inputs[0..4]
+    for j in 0 to 15 loop
+      report "pixel(" & integer'image(j) & ") = " &
+             integer'image(to_integer(unsigned(dbg_frame_pixels((j+1)*8-1 downto j*8))));
+    end loop;
+    for j in 0 to 15 loop
+      report "dbg_input_spike(" & integer'image(j) & ") = " & std_logic'image(dbg_input_spikes(j));
+    end loop;
+    for j in 0 to 7 loop
+      report "hidden_input(" & integer'image(j) & ") = " & integer'image(dbg_hidden_inputs(j));
+    end loop;
+    for j in 0 to 4 loop
+      report "output_input(" & integer'image(j) & ") = " & integer'image(dbg_output_inputs(j));
+    end loop;
+
+    wait for 1000 us;
+
+    -- --- send digit 3 ---
+    for i in 0 to 255 loop
+      img((i+1)*8-1 downto i*8) := img_digit3(i);
+    end loop;
+    frame_data <= img;
+
+    frame_valid <= '1';
+    wait for 10*CLK_PERIOD;
+    frame_valid <= '0';
+
+    wait until result_valid = '1';
+    report "Predicted digit (digit 3): " & integer'image(to_integer(unsigned(digit_out)));
+
+    -- print a few debug values again
+    for j in 0 to 15 loop
+      report "pixel(" & integer'image(j) & ") = " &
+             integer'image(to_integer(unsigned(dbg_frame_pixels((j+1)*8-1 downto j*8))));
+    end loop;
+    for j in 0 to 15 loop
+      report "dbg_input_spike(" & integer'image(j) & ") = " & std_logic'image(dbg_input_spikes(j));
+    end loop;
+    for j in 0 to 7 loop
+      report "hidden_input(" & integer'image(j) & ") = " & integer'image(dbg_hidden_inputs(j));
+    end loop;
+    for j in 0 to 4 loop
+      report "output_input(" & integer'image(j) & ") = " & integer'image(dbg_output_inputs(j));
+    end loop;
+
+    wait;
+  end process;
+end architecture;
