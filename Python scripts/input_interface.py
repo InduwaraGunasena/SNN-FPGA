@@ -90,7 +90,7 @@ def downsample_grid_copy():
         flat = [work_grid[i][j] for i in range(WORK_GRID_SIZE) for j in range(WORK_GRID_SIZE)]
     img = Image.new("L", (WORK_GRID_SIZE, WORK_GRID_SIZE))
     img.putdata(flat)
-    img = img.resize((FINAL_GRID_SIZE, FINAL_GRID_SIZE), Image.ANTIALIAS)
+    img = img.resize((FINAL_GRID_SIZE, FINAL_GRID_SIZE), Image.Resampling.LANCZOS)
     return list(img.getdata())
 
 def send_frame_and_wait_ack(payload_bytes):
