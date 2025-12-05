@@ -275,4 +275,374 @@ Every frame sent from Python → FPGA is:
 
 This provides resynchronization (preamble) and corruption detection (checksum), and flow control (ACK).
 
+
 ---
+
+# Project layout (suggested)
+
+```
+snn_fpga/
+├─ README.md
+├─ doc/
+│  ├─ design.md                 # high-level design notes, fixed-point strategy, bitwidth calc
+│  └─ verification_plan.md      # test plan + acceptance criteria
+├─ hw/
+│  ├─ vhdl/
+│  │  ├─ packages/
+│  │  │  ├─ types_pkg.vhd       # integer_matrix/integer_vector typedefs, common constants
+│  │  │  └─ weights_pkg.vhd     # auto-generated (your weights_pkg_q8_8.vhd)
+│  │  ├─ primitives/
+│  │  │  ├─ mac.vhd             # multiply-accumulate primitive / DSP wrapper
+│  │  │  ├─ shift_round.vhd     # shift & rounding helper (Q format)
+│  │  │  └─ fixed_mult.vhd      # fixed-point multiplier (option: use DSP48 wrapper)
+│  │  ├─ neurons/
+│  │  │  ├─ lif_neuron.vhd      # single LIF neuron (one instance)
+│  │  │  ├─ neuron_array.vhd    # N parallel neurons (array wrapper)
+│  │  │  └─ spike_reg.vhd       # small helper for spike storage/counting
+│  │  ├─ layers/
+│  │  │  ├─ fc_layer.vhd        # fully-connected layer (weights read from package)
+│  │  │  └─ fc_streaming.vhd    # streaming/pipelined FC for resource tradeoffs
+│  │  ├─ top/
+│  │  │  ├─ sNN_core.vhd        # integrate fc1 + lif1 + fc2 + lif_out (no IO)
+│  │  │  ├─ uart_comm.vhd       # UART RX/TX + packet handler (ACK/NAK + preamble)
+│  │  │  ├─ sevenseg.vhd        # 7-seg driver + multiplex logic
+│  │  │  └─ top_fpga.vhd        # Basys-3 top: clocks, resets, IO pins, instantiate modules
+│  │  └─ tb_helpers/
+│  │     ├─ mem_loader.vhd      # loads test vectors into memories (from files)
+│  │     └─ stim_gen.vhd        # testbench stimulus convenience routines
+│  └─ constraints/
+│     └─ basys3_pins.xdc        # pin constraints for Basys-3
+├─ sim/
+│  ├─ tb/
+│  │  ├─ tb_lif_neuron.vhd     # testbench: single neuron
+│  │  ├─ tb_mac.vhd            # testbench: MAC & accumulator
+│  │  ├─ tb_layer.vhd          # testbench: fc_layer + neuron_array
+│  │  ├─ tb_snn_core.vhd       # testbench: integrated SNN core (no IO)
+│  │  ├─ tb_uart.vhd           # testbench: UART comms (host emulator)
+│  │  └─ tb_top.vhd            # full top-level tb (includes uart and 7seg)
+│  ├─ wave_config.do           # ModelSim/Questa wave setup script
+│  └─ run_sim.sh               # helper script to run suite of sims
+├─ scripts/
+│  ├─ export_weights.py        # produce weights_pkg_vhd (yours exists) & .mem/.coe dumps
+│  ├─ py_dbg_to_stim.py        # convert forward_debug() arrays → CSV / mem files for tb
+│  ├─ stim_check.py            # compare VHDL output CSV vs python debug (golden) 
+│  └─ uart_host.py             # host-side serial test script (you have input_interface.py)
+├─ tools/
+│  ├─ calc_bitwidths.ipynb     # helper notebook: compute safe accumulator widths
+│  └─ synth_notes.txt          # hints for Vivado synthesis on Basys-3
+└─ sw/
+   └─ host/
+      └─ input_interface.py    # your GUI & serial sender (already present)
+```
+
+---
+
+# What each file / folder is for (concise purpose + important notes)
+
+### `doc/design.md`
+
+* Explain fixed-point Q8.8 choices, rounding semantics, overflow policy, and bit-width derivations.
+* Store the exact math mapping between Python ops and VHDL ops (e.g., `(W*X)>>8` behavior).
+* Note any approximations (saturation vs wrap, rounding vs truncation).
+* This is the authoritative reference used by all VHDL modules and tests.
+
+### `doc/verification_plan.md`
+
+* Test vectors, key assertions, pass/fail criteria, waveforms to inspect.
+* Includes testcases: single spike, repeated spikes, heavy positive/negative inputs, threshold edgecases.
+
+---
+
+### `hw/vhdl/packages/types_pkg.vhd`
+
+* Declare `integer_vector`, `integer_matrix`, Q format constants, and any useful subtype ranges.
+* Provide signed / unsigned aliases and shift functions for fixed-point conversions.
+
+### `hw/vhdl/packages/weights_pkg.vhd`
+
+* Your auto-generated package (the sample you posted).
+* Contains `W_INPUT_HIDDEN`, `B_INPUT_HIDDEN`, `W_HIDDEN_OUTPUT`, `B_HIDDEN_OUTPUT`, `LIF_BETA_Q`, `THRESHOLD_Q`, constants `N_INPUTS`, `N_HIDDEN`, `N_OUTPUT`, and `Q_SCALE`.
+* Used by `fc_layer` and top-level to load constants at elaboration time.
+
+Important: keep your generator idempotent and include a comment with exact `Q_SCALE`, `q_frac_bits` so testbench knows how to interpret integers.
+
+---
+
+### `hw/vhdl/primitives/mac.vhd`
+
+* Multiply-accumulate core.
+* Should accept inputs in Q8.8 (integers), produce extended-width product (e.g., signed 24-bit), and sum into an accumulator of chosen width.
+* Provide two variants: behavioral & DSP-optimized (wrap a DSP block instantiation).
+
+Implementation note: design it so you can instantiate a single MAC time-multiplexed (to save resources) OR many parallel MACs (for speed).
+
+---
+
+### `hw/vhdl/primitives/fixed_mult.vhd` / `shift_round.vhd`
+
+* Multiply two Q8.8 numbers and return result scaled appropriately (implement `product >> Q_BITS` with rounding/truncation as decided in `design.md`).
+* `shift_round.vhd` implements (product + round_const) >> Q_BITS if you choose rounding.
+
+---
+
+### `hw/vhdl/neurons/lif_neuron.vhd`
+
+* Implements one LIF neuron with these interfaces (suggested):
+
+  * `input`  : signed integer Q8.8
+  * `mem_in` : signed wider int (accumulator)
+  * `mem_out`: signed wider int
+  * `spike`  : std_logic
+  * control signals to reset / load / enable
+* Implements the logic:
+
+  ```
+  mem = beta*mem + input
+  spike = (mem > threshold)
+  mem = spike ? mem - threshold : mem
+  ```
+* Must match Python rounding and reset semantics exactly (document them).
+
+---
+
+### `hw/vhdl/neurons/neuron_array.vhd`
+
+* Replicate / instantiate `N` `lif_neuron`s.
+* Provide per-neuron memory (`mem[]`) and configurable beta, threshold signals (load from package).
+
+---
+
+### `hw/vhdl/layers/fc_layer.vhd`
+
+* Implements matrix-vector multiply `z = W*x + b`.
+* Two modes:
+
+  * **Streaming** (one MAC reused, iterate across inputs), minimal resources.
+  * **Parallel** (many MACs at once), lower latency, higher resource use.
+* Reads weights from `weights_pkg` at synthesis/elaboration time or from BRAM initialised with `.mem` files (choose approach).
+* Produces output in same Q format.
+
+---
+
+### `hw/vhdl/layers/fc_streaming.vhd`
+
+* A pipelined streaming version: input arrives serially or from local regs, produce outputs after N cycles.
+
+---
+
+### `hw/vhdl/top/sNN_core.vhd`
+
+* The SNN dataflow core: connect `fc1` → `neuron_array`(lif1) → `fc2` → `neuron_array`(lif_out).
+* No host-facing IO; intended to be functionally identical to Python core.
+* Expose test hooks: internal signals (z1, mem1, spike1, z2, mem2, spike2) to testbench.
+
+---
+
+### `hw/vhdl/top/uart_comm.vhd`
+
+* UART RX + TX + frame parser.
+* Recognize preamble `0xAA,0x55`, read 256 payload bytes, verify checksum, assert ACK/NAK.
+* Provide handshake signals: `frame_valid`, `payload_ready`, `payload_data_read`.
+* Must support baud as in your host script (115200), include small buffer for frames.
+
+---
+
+### `hw/vhdl/top/sevenseg.vhd`
+
+* Convert predicted digit (0–9) to 7-seg codes and multiplex common anodes/cathodes.
+* Include blinking / display state machine.
+
+---
+
+### `hw/vhdl/top/top_fpga.vhd`
+
+* Hook up clock/reset, instantiate `uart_comm`, `sNN_core`, `sevenseg`.
+* Provide user LEDs or UART debug signals for easier HW debug.
+* Include optional simple CPU-like control FSM: idle → receive frame → run `num_steps` cycles → send ACK & final result.
+
+---
+
+### `hw/vhdl/tb_helpers/mem_loader.vhd`
+
+* Small file read routine for simulation that loads `.mem` or `.csv` file into an array (used by tb to initialize inputs or expected outputs).
+
+---
+
+## Simulation files (what to test and why)
+
+### `sim/tb/tb_lif_neuron.vhd` — Single neuron testbench
+
+* Purpose: validate one `lif_neuron` against Python `forward_debug()` for one timestep and edge-cases.
+* Stimulus:
+
+  * Small set of input currents `cur` (positive, negative, threshold-just-below, threshold-just-above).
+  * Repeated alpha bumps (to test mem leak `beta` behavior).
+  * Reset sequence.
+* Checks:
+
+  * Compare `mem` and `spike` per-step to Python golden values.
+  * Assertion on bit-exact equality if you used exact same Q math, else tolerance check if rounding differs.
+
+### `sim/tb/tb_mac.vhd` — MAC / accumulator testbench
+
+* Purpose: ensure multiply/accumulate, fixed-point shift, rounding, and accumulator width are correct.
+* Stimulus:
+
+  * Random vectors + provided worst-case vectors (max positive, max negative).
+* Checks:
+
+  * Compare MAC output to Python integer calculation (`(sum(W_i * x_i) // Q_SCALE) + b`).
+
+### `sim/tb/tb_layer.vhd` — FC layer + neuron array
+
+* Purpose: validate a full layer (fc1 + lif neuron array).
+* Stimulus:
+
+  * Use `py_dbg_to_stim.py` to create `.mem` files with a small input and expected `z1, mem1, spk1`.
+* Checks:
+
+  * Per-neuron `z`, `mem`, `spk` match Python debug arrays.
+  * Per-step checks across `num_steps` if you simulate time steps.
+
+### `sim/tb/tb_snn_core.vhd` — Integrated SNN (no comm)
+
+* Purpose: validate full forward pass across `num_steps` (20).
+* Stimulus:
+
+  * Load weights from `weights_pkg`.
+  * Use `py_dbg_to_stim.py` to create test input image vector AND the complete `forward_debug` arrays for all timesteps.
+* Checks:
+
+  * Bit-exact comparison of all recorded internal arrays (cur1, mem1, spk1, cur_out, mem_out, spk_out) per timestep.
+  * Final predicted class matches Python argmax.
+
+### `sim/tb/tb_uart.vhd` — UART & protocol testbench
+
+* Purpose: validate serial reception, checksum validation, ACK/NAK logic.
+* Stimulus:
+
+  * TB drives RX line with preamble + payload + correct checksum and with corrupted frames.
+* Checks:
+
+  * `frame_valid` asserted when valid frame arrives.
+  * `ACK` transmitted on TX when correct; `NAK` for bad checksum.
+
+### `sim/tb/tb_top.vhd` — Full top-level testbench (end-to-end)
+
+* Purpose:
+
+  * Test the whole system: host sends frame → FPGA runs inference for `num_steps` cycles → FPGA returns ACK and optionally result via UART or seven-seg outputs.
+* Stimulus:
+
+  * Use `mem_loader` to inject input frames and compare final results with Python golden answers.
+* Checks:
+
+  * End-to-end latency measurement (cycles between frame reception and valid result).
+  * Seven-seg encoding correctness (if modeled in TB).
+  * UART return packets if implemented.
+
+---
+
+# How to feed Python golden values into VHDL tests
+
+Create a small pipeline of helper scripts (you already have most pieces):
+
+1. `py_dbg_to_stim.py`
+
+   * Load `forward_debug()` outputs saved from Python as `.npz` or `.npy`.
+   * Convert arrays to integer CSV or a `.mem` (text file with one integer per line) matching your VHDL memory format.
+   * Save expected outputs (z1_t0.csv, mem1_t0.csv, spk1_t0.csv ...) or one file per signal with time-indexed rows.
+
+2. `export_weights.py` (you already have weights_pkg generator)
+
+   * Also write `.mem` versions if you prefer BRAM inits (for simulation use).
+
+3. In testbenches, use `mem_loader.vhd` to read these files and drive stimulus.
+
+4. `stim_check.py`
+
+   * After simulation, export the internal signal traces to a CSV (many simulators can dump signal arrays to a file).
+   * Compare bitwise with Python golden; produce PASS/FAIL, and a delta log of mismatches.
+
+---
+
+# Exact verification checks to include (automated)
+
+* **Bit-exact equality** checks for all internal integers (try this first).
+* If small differences appear due to rounding policy, run a **tolerance check** (absolute difference ≤ 1 or per-signal tolerance).
+* **Overflow/saturation checks**: intentionally force large inputs and assert that behavior matches documented policy.
+* **Timing assertions**: e.g., `frame_valid` must be asserted exactly when payload is ready.
+
+---
+
+# Bitwidth & fixed-point practical guidance (important)
+
+* You chose Q8.8 (scale=256). Key arithmetic steps:
+
+  * Multiply two Q8.8 integers → product in Q16.16 (width = sum of operand widths).
+  * You must **right-shift by Q_BITS (8)** to bring product back to Q8.8.
+  * Sum many products: choose accumulator width to avoid overflow.
+
+**Conservative accumulator sizing** (recommended):
+
+* Worst-case product magnitude with signed int16 weight (±32767) and input up to 256:
+
+  * product_max ≈ 32767 * 256 = 8,388,352 (≈ 23 bits unsigned)
+* Summing 256 inputs:
+
+  * sum_max ≈ 8,388,352 * 256 = 2,147,483,648 (≈ 32 bits unsigned → equals 2^31)
+* So the minimal signed accumulator width to hold all sums without overflow is **33 bits** (to represent ±2^31).
+* **Safer practical width**: use **40 bits** (or at least 36) to allow margin for intermediate ops, bias addition and multiplication by beta.
+
+If your trained weights are known to be much smaller (as in your sample), you can reduce width, but verify worst-case in `tools/calc_bitwidths.ipynb`.
+
+---
+
+# Simulation environment & practical tips
+
+* Use **ModelSim/Questa** or **GHDL + GTKWave**. ModelSim is friendlier for large VHDL + wave configuration scripts.
+* Put wave setup in `sim/wave_config.do` to quickly inspect key signals.
+* Use `run_sim.sh` to run multiple test benches automatically and produce a consolidated `results` dir.
+* Export simulation results for signals of interest to CSV (use simulator `-r` or `log` commands) for comparison with `stim_check.py`.
+
+---
+
+# Host / UART protocol notes (how your `input_interface.py` fits)
+
+* Your host script sends `PREAMBLE + payload(256 bytes) + checksum`.
+* `uart_comm.vhd` must:
+
+  * Wait for the preamble pattern,
+  * Read exactly `N_INPUTS` bytes,
+  * Verify checksum (sum%256),
+  * Drive `payload_ready` with payload (unpack to Q8.8 ints),
+  * Send ACK (`0x06`) on success or NAK (`0x15`) on failure.
+
+**Sim TB for UART**:
+
+* TB must emulate host transmitter by toggling `rx` line according to the baud rate.
+* You can accelerate by driving bytes directly if your UART RX primitive API supports it.
+
+
+---
+
+Resource / performance estimate (approx)
+
+Using single MAC:
+
+fc1: N_HIDDEN * N_INPUTS = 64 * 256 = 16384 cycles
+
+lif1: ~N_HIDDEN = 64 cycles
+
+fc2: N_OUTPUT * N_HIDDEN = 10 * 64 = 640 cycles
+
+lif2: ~N_OUTPUT = 10 cycles
+
+per timestep ≈ 17098 cycles ≈ ~17k cycles
+
+for NUM_STEPS = 20 → ~341,960 cycles total
+
+At 100 MHz clock → 341,960 / 100e6 ≈ 3.42 ms per inference.
+This is comfortably under your 10 ms requirement. If you run at 50 MHz, ≈6.84 ms — still okay.
+
+If you want to further reduce latency, the design can be changed to use PARALLELISM (e.g., 4 MACs) — I can add that later.
