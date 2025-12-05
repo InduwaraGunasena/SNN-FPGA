@@ -195,7 +195,7 @@ begin
                         end if;
 
                     when ARGMAX =>
-                        maxv := -2147483648;
+                        maxv := -2147483647;
                         maxi := 0;
                         for o in 0 to N_OUTPUT-1 loop
                             if score_vec(o) > maxv then
