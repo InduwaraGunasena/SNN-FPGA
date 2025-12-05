@@ -2,6 +2,7 @@ snn-fpga/snn-fpga.sim/
 snn-fpga/snn-fpga.ip_user_files/
 snn-fpga/snn-fpga.cache/
 snn-fpga/snn-fpga.hw/
+snn-fpga/snn-fpga.runs/
 
 snn-fpga/snn-fpga.hw/snn-fpga.lpr
 
