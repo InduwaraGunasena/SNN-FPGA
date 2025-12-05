@@ -8,12 +8,12 @@ entity uart_frame_receiver256 is
     BAUD     : integer := 115200
   );
   port(
-    clk        : in  std_logic;
-    rst        : in  std_logic;
-    rx         : in  std_logic;  -- UART RX
-    tx         : out std_logic;  -- UART TX (ACK/NAK)
-    frame_data : out std_logic_vector(8*256-1 downto 0); -- payload bytes packed
-    frame_valid: out std_logic   -- pulse when new frame latched
+    clk         : in  std_logic;
+    rst         : in  std_logic;
+    rx          : in  std_logic;  -- UART RX
+    tx          : out std_logic;  -- UART TX (ACK/NAK)
+    frame_data  : out std_logic_vector(8*256-1 downto 0); -- payload bytes packed
+    frame_valid : out std_logic   -- pulse when new frame latched
   );
 end entity;
 
@@ -52,55 +52,50 @@ begin
 
   -- main parsing process
   process(clk)
-    -- process-local variables
-    variable tmp     : std_logic_vector(data_reg'range);
+    -- Fixed: Variable declared with correct name
     variable sum_chk : integer := 0;
-    variable idx_lo  : natural := 0;
-    variable idx_hi  : natural := 0;
   begin
     if rising_edge(clk) then
+      -- Default values
+      ready_r      <= '0';
+      tx_start_sig <= '0'; 
+      -- tx_byte_sig holds previous value unless updated
+      
       if rst = '1' then
         fstate       <= WAIT_P1;
         byte_idx     <= 0;
         data_reg     <= (others => '0');
-        ready_r      <= '0';
-        tx_start_sig <= '0';
+        sum_chk      := 0; -- Use := for variables
         tx_byte_sig  <= (others => '0');
-        sum_chk      := 0;
-
+      
       else
-        ready_r      <= '0';
-        tx_start_sig <= '0';  -- default: don’t start tx this cycle
-
         if rx_ready = '1' then
           case fstate is
             when WAIT_P1 =>
               if rx_byte = x"AA" then
                 fstate <= WAIT_P2;
-              else
-                fstate <= WAIT_P1;
               end if;
 
             when WAIT_P2 =>
               if rx_byte = x"55" then
                 fstate   <= COLLECT;
                 byte_idx <= 0;
-                sum_chk  := 0;
+                sum_chk  := 0; -- Reset checksum accumulator
               elsif rx_byte = x"AA" then
-                fstate <= WAIT_P2; -- saw another AA
+                fstate <= WAIT_P2; -- Stay in P2 if we get another AA
               else
                 fstate <= WAIT_P1;
               end if;
 
             when COLLECT =>
-              -- write byte into data_reg at position byte_idx
-              tmp := data_reg;
-              idx_lo := byte_idx * 8;
-              idx_hi := idx_lo + 7;
-              tmp(idx_hi downto idx_lo) := rx_byte;
-              data_reg <= tmp;
+              -- Use loop for static assignment (Synth 8-27 fix)
+              for i in 0 to 255 loop
+                  if i = byte_idx then
+                      data_reg((i*8)+7 downto i*8) <= rx_byte;
+                  end if;
+              end loop;
 
-              -- update checksum
+              -- Update Checksum variable
               sum_chk := (sum_chk + to_integer(unsigned(rx_byte))) mod 256;
 
               if byte_idx = 255 then
@@ -110,19 +105,18 @@ begin
               end if;
 
             when CHECKSUM =>
-              -- rx_byte is checksum byte
-              if to_integer(unsigned(rx_byte)) = (sum_chk mod 256) then
-                -- good frame
-                ready_r      <= '1';
-                tx_byte_sig  <= x"06";    -- ACK
+              -- Verify checksum
+              if to_integer(unsigned(rx_byte)) = sum_chk then
+                ready_r      <= '1';   -- Pulse valid
+                tx_byte_sig  <= x"06"; -- ACK
                 tx_start_sig <= '1';
                 fstate       <= WAIT_P1;
               else
-                -- bad frame -> NAK
-                tx_byte_sig  <= x"15";    -- NAK
+                tx_byte_sig  <= x"15"; -- NAK
                 tx_start_sig <= '1';
                 fstate       <= WAIT_P1;
               end if;
+              
           end case;
         end if;
       end if;
