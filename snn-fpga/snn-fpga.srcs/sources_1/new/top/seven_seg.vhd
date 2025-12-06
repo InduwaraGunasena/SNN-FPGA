@@ -18,18 +18,20 @@ architecture rtl of seven_seg is
 begin
 process(digit)
     begin
-        case digit is
-            when 0 => segs <= "1111110"; -- 0
-            when 1 => segs <= "0110000"; -- 1
-            when 2 => segs <= "1101101"; -- 2
-            when 3 => segs <= "1111001"; -- 3
-            when 4 => segs <= "0110011"; -- 4
-            when 5 => segs <= "1011011"; -- 5
-            when 6 => segs <= "1011111"; -- 6
-            when 7 => segs <= "1110000"; -- 7
-            when 8 => segs <= "1111111"; -- 8
-            when 9 => segs <= "1111011"; -- 9
-            when others => segs <= "0000000";
+        case digit is       
+        -- Basys 3 has common anode type 7 seg display (0= on 1=off    g f e d c b a)
+            when 0 => segs <= "1000000"; -- 0
+            when 1 => segs <= "1111001"; -- 1
+            when 2 => segs <= "0100100"; -- 2
+            when 3 => segs <= "0110000"; -- 3
+            when 4 => segs <= "0011001"; -- 4
+            when 5 => segs <= "0010010"; -- 5
+            when 6 => segs <= "0000010"; -- 6
+            when 7 => segs <= "1111000"; -- 7
+            when 8 => segs <= "0000000"; -- 8
+            when 9 => segs <= "0010000"; -- 9
+            when others => segs <= "1111111";
+            
         end case;
 end process;
 end architecture rtl;
