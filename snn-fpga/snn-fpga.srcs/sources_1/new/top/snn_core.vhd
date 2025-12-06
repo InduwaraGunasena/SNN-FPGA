@@ -142,6 +142,8 @@ begin
                     when IDLE =>
                         inf_done <= '0';
                         if start_infer = '1' then
+                            -- CRITICAL FIX: Reset scores before new inference
+                            score_vec <= (others => 0);
                             s_fc1_start <= '1';
                             state <= FC1_RUN;
                         end if;
