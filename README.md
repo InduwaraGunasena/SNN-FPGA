@@ -4,6 +4,11 @@ Welcome to the **SNN-FPGA** project\! This repository hosts a complete hardware-
 
 Our goal was to bridge the gap between biological inspiration and hardware efficiency. By mimicking the spiking behavior of biological neurons, this project demonstrates how neural networks can be deployed in resource-constrained embedded systems using VHDL.
 
+<p align="center">
+<img src="/images/img.gif" alt="working model" width="500"/>
+</p>
+
+
 **Key Features:**
 
   * **Real-Time Interaction:** Users draw digits on a Python GUI, and the FPGA classifies them instantly.
@@ -132,7 +137,7 @@ To interact with the model, we built a custom UART interface running at **115200
 
 
 <p align="center">
-<img src="/images/Hardware Architecture.png" alt="Block diagram of the SNN in FPGA" width="500"/>
+<img src="/images/Hardware Architecture.png" alt="Block diagram of the SNN in FPGA" width="750"/>
 <br>
 <sub>Figure: Block diagram of the SNN in FPGA</sub>
 </p>
@@ -167,23 +172,36 @@ This results in \~73 predictions per second. For a human writing digits on a scr
 > You might notice the Basys 3 has a 100 MHz oscillator, but we divide it down to 25 MHz.
 > The SNN logic involves a long **combinational path**: reading a weight from ROM $\rightarrow$ multiplying by input $\rightarrow$ adding to a 32-bit accumulator. This logic chain takes longer than 10 nanoseconds (the period of a 100 MHz clock) to stabilize. Running at 100 MHz causes **timing violations**, leading to unstable or random predictions. Slowing to 25 MHz gives the signals 40 nanoseconds to propagate, ensuring stable and accurate results.
 
+### Resource Consumption
+
+The design was synthesized for the Basys 3 (Artix-7 XC7A35T). The table below summarizes the post-implementation resource utilization:
+
+<p align="center">
+<img src="/images/model summary.png" alt="Model summary" width="500"/>
+<br>
+<sub>Figure: SNN Model summary</sub>
+</p>
+
+* LUT(Look-Up Tables) Usage (35.5%): This is our primary constraint. Since we store the model weights in distributed ROM (logic slices) rather than dedicated Block RAM, the LUT usage is relatively high. This simplifies memory access but limits the maximum size of the network we can fit on this specific chip.
+
+* DSP(Digital Signal Processors) Usage (11.1%): We only consume 10 DSP slices because our sequential design efficiently reuses the same multipliers for every neuron. A fully parallel design would likely exhaust these DSPs, but our approach leaves plenty of room for future arithmetic expansions.
+
 -----
 
 ## Future Prospects
 
 This project is a functional proof-of-concept, but there is plenty of room to scale. Here is how we plan to evolve the design:
 
-  * **Parallelism (Multi-MAC)**
-      * *Current:* We use 1 MAC unit, processing one weight at a time.
-      * *Future:* Implementing 4 or 8 parallel MAC units would cut the latency by 4x or 8x, allowing us to process larger images or more complex networks in the same amount of time.
-  * **Pipelining**
-      * *Current:* Layer 2 waits for Layer 1 to finish completely.
-      * *Future:* Pipelining would allow Layer 2 to start processing the first neuron as soon as Layer 1 finishes it, significantly increasing throughput.
-  * **Deep SNNs via DDR Memory**
-      * *Current:* Weights are stored in FPGA Logic (BRAM/Distributed RAM), which has very small capacity. This limits us to 1 hidden layer.
-      * *Future:* Fetching weights from external DDR memory would allow for Deep Neural Networks with millions of parameters.
-  * **On-Chip Learning (STDP)**
-      * *Current:* The FPGA is "inference-only." It cannot learn new things; it only knows what it was trained on in Python.
-      * *Future:* Implementing Spike-Timing-Dependent Plasticity (STDP) would allow the FPGA to update its own weights, enabling it to learn your specific handwriting style in real-time.
+* **Parallelism (Multi-MAC)**
+Currently, the design uses a single Multiply-Accumulate (MAC) unit, which processes one weight at a time. This sequential bottleneck is the main reason for the 13.68 ms latency. In the future, we plan to implement 4 or 8 parallel MAC units. This would allow the system to process multiple weights simultaneously, linearly reducing the latency by 4x or 8x. This improvement is crucial if we want to process larger images or run the network at higher frame rates.
+
+* **Pipelining**
+In the current architecture, Layer 2 (Hidden $\to$ Output) sits idle until Layer 1 (Input $\to$ Hidden) has completely finished processing all neurons. Future iterations will introduce pipelining, allowing Layer 2 to begin processing the first neuron as soon as Layer 1 finishes it. This overlapping of execution stages would significantly increase the throughput of the system without requiring additional logic resources.
+
+* **Deep SNNs via DDR Memory**
+Our weights are currently "baked" into the FPGA logic (Distributed RAM/BRAM), which has very limited capacity. This restricts us to a shallow network with only one hidden layer. To support Deep Neural Networks (DNNs) with millions of parameters, future designs will interface with the external DDR memory on the Basys 3 board. Fetching weights from off-chip memory would allow us to scale the architecture to arbitrarily deep networks, limited only by memory bandwidth rather than chip logic.
+
+* **On-Chip Learning (STDP)**
+The FPGA acts as an "inference-only" engine right now; it cannot learn new information and only knows what it was trained on in Python. A major future goal is to implement Spike-Timing-Dependent Plasticity (STDP) directly in hardware. This would allow the FPGA to update its own weights based on the timing of incoming spikes, enabling it to learn your specific handwriting style in real-time without needing to be retrained on a PC.
 
 -----
