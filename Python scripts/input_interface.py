@@ -39,15 +39,33 @@ needs_send = False  # <--- NEW: Flag to track changes
 
 # ------------------- GUI -------------------
 root = tk.Tk()
-root.title("16x16 Digit Input Interface")
+root.title("FPGA Digit Classifier")
 
 work_grid = [[0 for _ in range(WORK_GRID_SIZE)] for _ in range(WORK_GRID_SIZE)]
 rects = [[None for _ in range(WORK_GRID_SIZE)] for _ in range(WORK_GRID_SIZE)]
 grid_lock = threading.Lock()
 
+# 1. Canvas (Top)
 canvas_size = WORK_GRID_SIZE * CELL_SIZE + 2 * PADDING
 canvas = tk.Canvas(root, width=canvas_size, height=canvas_size, bg="white")
 canvas.pack()
+
+# 2. Info Stack (Middle)
+info_frame = tk.Frame(root, pady=5)
+info_frame.pack()
+
+lbl_chk = tk.Label(info_frame, text="Checksum: --", font=("Consolas", 12))
+lbl_chk.pack()
+
+lbl_pred = tk.Label(info_frame, text="Prediction: --", font=("Arial", 16, "bold"), fg="blue")
+lbl_pred.pack()
+
+lbl_time = tk.Label(info_frame, text="Latency: -- ms", font=("Consolas", 10), fg="gray")
+lbl_time.pack()
+
+# 3. Buttons (Bottom)
+btn_frame = tk.Frame(root)
+btn_frame.pack(pady=10)
 
 
 # ------------------- Preprocessing ---------------------
@@ -178,30 +196,6 @@ def downsample_grid_copy():
 
     return arr  # flattened 0..1
 
-def send_frame_and_wait_ack(payload_bytes):
-    if ser is None: return False
-    
-    checksum = sum(payload_bytes) & 0xFF
-    pkt = PREAMBLE + bytes(payload_bytes) + bytes([checksum])
-    try:
-        ser.reset_input_buffer()
-        ser.write(pkt)
-        ser.flush()
-    except Exception as e:
-        print("Serial write error:", e)
-        return False
-
-    deadline = time.time() + ACK_TIMEOUT
-    while time.time() < deadline:
-        if ser.in_waiting > 0:
-            resp = ser.read(1)
-            if resp == ACK_BYTE:
-                return True
-            if resp == NAK_BYTE:
-                return False
-        time.sleep(0.005) # Check tighter loop
-    return False
-
 def sender_thread_fn():
     global needs_send
     while True:
@@ -224,21 +218,58 @@ def sender_thread_fn():
             # This logic matches your VHDL sum_temp logic
             local_checksum = sum(x_q) & 0xFF  # Keep lowest 8 bits
             print(f"Python Checksum: {local_checksum: >3} (Binary: {local_checksum:08b})", end=' ')
-            ok = send_frame_and_wait_ack(payload)
             
-            if ok:
-                print("[OK]\n")
-            else:
-                print(" Failed (No ACK)\n")
-                # If failed, force a retry next loop by setting flag back to True
-                needs_send = True 
+            # Use root.after to safely update GUI from thread
+            root.after(0, lambda: lbl_chk.config(text=f"Checksum: {local_checksum:08b} ({local_checksum})"))
+            root.after(0, lambda: lbl_pred.config(text="Prediction: ...", fg="gray"))
+            root.after(0, lambda: lbl_time.config(text="Latency: ..."))
+
+            # 3. Send & Measure Time
+            if ser:
+                checksum = sum(payload) & 0xFF
+                pkt = PREAMBLE + bytes(payload) + bytes([checksum])
+                
+                try:
+                    ser.reset_input_buffer()
+
+                    # START TIMER
+                    start_time = time.time()
+
+                    ser.write(pkt)
+                    ser.flush()
+                    
+                    # 4. Wait for ACK
+                    ack = ser.read(1)
+                    
+                    if ack == ACK_BYTE:
+                        # 5. Wait for Prediction (It follows the ACK)
+                        # Give it a small timeout in case SNN takes time
+                        pred_byte = ser.read(1)
+
+                        # STOP TIMER
+                        end_time = time.time()
+                        latency_ms = (end_time - start_time) * 1000
+                        
+                        if len(pred_byte) > 0:
+                            pred_val = int(pred_byte[0])
+                            # SUCCESS: Update Prediction Label
+                            root.after(0, lambda: lbl_pred.config(text=f"Prediction: {pred_val}", fg="green"))
+                            root.after(0, lambda: lbl_time.config(text=f"Latency: {latency_ms:.1f} ms"))
+                            print(f"Success. Pred: {pred_val}")
+                        else:
+                            root.after(0, lambda: lbl_pred.config(text="Prediction: Timeout", fg="orange"))
+                            
+                    elif ack == NAK_BYTE:
+                        root.after(0, lambda: lbl_pred.config(text="Error: Checksum NAK", fg="red"))
+                    else:
+                        root.after(0, lambda: lbl_pred.config(text="Error: No Response", fg="red"))
+
+                except Exception as e:
+                    print("Serial error:", e)
             
-            # 4. Cooldown (Debounce)
-            # This prevents sending 100 packets per second while you drag the mouse.
             time.sleep(MIN_SEND_INTERVAL)
             
         else:
-            # If no changes, sleep to save CPU
             time.sleep(0.05)
 
 # start sender background thread
@@ -251,9 +282,7 @@ canvas.bind("<Button-1>", brush_paint)
 # Optional: Trigger a final send immediately on mouse release to catch the final pixel
 canvas.bind("<ButtonRelease-1>", lambda e: None) 
 
-btn_frame = tk.Frame(root)
-btn_frame.pack(pady=10)
-tk.Button(btn_frame, text="Clear", command=clear_grid).pack(side=tk.LEFT, padx=10)
+tk.Button(btn_frame, text="Clear Grid", command=clear_grid, font=("Arial", 12)).pack(side=tk.LEFT, padx=10)
 
 # -------- Start --------
 draw_grid()
