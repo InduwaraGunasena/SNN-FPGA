@@ -26,11 +26,12 @@ architecture rtl of top_fpga is
     signal input_vec      : int_vector_t(0 to 255);
     signal start_inf      : std_logic := '0';
     signal core_rst       : std_logic := '0'; -- Controlled Reset Signal
+    signal rst_cnt        : integer range 0 to 31 := 0;
     signal inf_done       : std_logic;
     signal result         : integer range 0 to 9;
     
     -- Control FSM
-    type t_ctrl_state is (IDLE, ASSERT_RESET, START_INFER, WAIT_DONE);
+    type t_ctrl_state is (IDLE, ASSERT_RESET, START_INFER, WAIT_STABLE, WAIT_DONE);
     signal ctrl_state : t_ctrl_state := IDLE;
         
     -- Display signals
@@ -86,7 +87,28 @@ begin
                     -- Pulse Reset High to clear LIF membranes and Scores
                     core_rst <= '1';
                     start_inf <= '0';
-                    ctrl_state <= START_INFER;
+                    
+                    -- ctrl_state <= START_INFER;                                     
+                    if rst_cnt < 15 then
+                        rst_cnt <= rst_cnt + 1;
+                        ctrl_state <= ASSERT_RESET; -- Stay here
+                    else
+                        rst_cnt <= 0;
+                        ctrl_state <= WAIT_STABLE; -- NEW: Go here instead of START_INFER                    
+                    end if;
+                    
+                -- NEW STATE: Hold everything low for a few cycles
+                when WAIT_STABLE =>
+                    core_rst <= '0';   -- Release Reset
+                    start_inf <= '0';  -- Wait before Starting
+    
+                    if rst_cnt < 10 then  -- Reuse counter for a short delay
+                        rst_cnt <= rst_cnt + 1;
+                        ctrl_state <= WAIT_STABLE;
+                    else
+                        rst_cnt <= 0;
+                        ctrl_state <= START_INFER; -- NOW we start
+                    end if;
 
                 when START_INFER =>
                     -- Release Reset, Trigger Start
