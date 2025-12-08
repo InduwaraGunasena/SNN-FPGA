@@ -127,14 +127,17 @@ The design uses a single MAC unit per layer to conserve resources. The cycle cou
       * $\approx 10 \text{ cycles}$ (Sequential update of output neurons)
 
 **Total Cycles per Time Step:**
+<br>
 $$16,384 + 64 + 640 + 10 \approx 17,098 \text{ cycles}$$
 
 **Total Cycles per Inference (20 Steps):**
+<br>
 $$17,098 \times 20 \approx 341,960 \text{ cycles}$$
 
 ### Latency Calculation
 
 Running on a system clock of **25 MHz**:
+<br>
 $$\text{Latency} = \frac{\text{Total Cycles}}{\text{Clock Frequency}} = \frac{341,960}{25 \times 10^6} \approx \mathbf{13.68 \text{ ms}}$$
 
 This latency ($\approx 13.7$ ms) allows for approximately **73 inferences per second**, which is well within the requirements for a real-time user interface where human reaction time is significantly slower.
