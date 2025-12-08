@@ -17,7 +17,10 @@ entity top_fpga is
 end entity top_fpga;
 
 architecture rtl of top_fpga is
-
+    -- CLOCK DIVIDER SIGNALS
+    signal clk_div   : unsigned(1 downto 0) := "00";
+    signal sys_clk   : std_logic; -- This will be 25 MHz
+    
     -- Signals for UART
     signal uart_data_flat : std_logic_vector(2047 downto 0); -- 256 * 8 bits
     signal uart_valid     : std_logic;
@@ -43,14 +46,28 @@ architecture rtl of top_fpga is
 
 begin
 
+    -- 1. Clock Divider Process (100MHz -> 25MHz)
+    -- We count 0..3. Bit 1 toggles every 2 cycles (Divide by 4).
+    process(clk)
+    begin
+        if rising_edge(clk) then
+            clk_div <= clk_div + 1;
+        end if;
+    end process;
+
+    -- Use Bit 1 as the new system clock (25 MHz)
+    -- Use a BUFG if you want to be proper, but for this speed direct assignment works.
+    sys_clk <= clk_div(1);
+    
+    
     -- 1. Instantiate Your Specific UART Receiver
     u_uart_rx : entity work.uart_frame_receiver256
     generic map(
-        CLK_FREQ => 100_000_000,
+        CLK_FREQ => 25_000_000, --100_000_000,
         BAUD     => 115200
     )
     port map(
-        clk         => clk,
+        clk         => sys_clk,
         rst         => '0',
         rx          => RsRx,
         tx          => RsTx,         -- Connects to Basys 3 TX pin
@@ -61,10 +78,10 @@ begin
     -- 2. Data Conversion Process (Bit Vector -> Integer Array)
     -- This unpacks the 2048-bit vector into 256 integers for the SNN
     -- Main Control Process (Unpacking + Reset Logic)
-    process(clk)
+    process(sys_clk)
         variable sum_temp : unsigned(7 downto 0);
     begin
-        if rising_edge(clk) then
+        if rising_edge(sys_clk) then
             case ctrl_state is
                 when IDLE =>
                     start_inf <= '0';
@@ -130,7 +147,7 @@ begin
     u_core : entity work.snn_core
     generic map(NUM_STEPS => 20)
     port map(
-        clk         => clk,
+        clk         => sys_clk,
         rst         => core_rst,   -- <--- use the core_rst signal so reset pulses reach the SNN
         start_infer => start_inf,
         input_vec   => input_vec,
