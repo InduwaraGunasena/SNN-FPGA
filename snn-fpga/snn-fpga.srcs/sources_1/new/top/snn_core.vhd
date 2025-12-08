@@ -1,4 +1,3 @@
--- hw/vhdl/top/snn_core.vhd  (replaces snn_core_seq.vhd)
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.NUMERIC_STD.ALL;
@@ -47,7 +46,11 @@ architecture rtl of snn_core is
     signal spikes2     : std_logic_vector(0 to N_OUTPUT-1) := (others => '0');
 
     signal score_vec   : int_vector_t(0 to N_OUTPUT-1) := (others => 0);
-
+    
+    -- DEBUG signals for membrane potentials
+    signal dbg_mem1 : int_vector_t(0 to N_HIDDEN-1);
+    signal dbg_mem2 : int_vector_t(0 to N_OUTPUT-1);
+        
     -- FSM
     type state_t is (IDLE, FC1_RUN, LIF1_RUN, FC2_RUN, LIF2_RUN, ARGMAX);
     signal state : state_t := IDLE;
@@ -78,7 +81,7 @@ begin
         port map (
             clk => clk, rst => rst, start => s_lif1_start,
             cur_in => z1_vec, beta_q => LIF_BETA_Q, threshold => THRESHOLD_Q,
-            done => s_lif1_done, mem_out => open, spikes => spikes1
+            done => s_lif1_done, mem_out => dbg_mem1, spikes => spikes1
         );
 
     -- instantiate fc2: hidden->output (pass different weights)
@@ -104,7 +107,7 @@ begin
         port map (
             clk => clk, rst => rst, start => s_lif2_start,
             cur_in => z2_vec, beta_q => LIF_BETA_Q, threshold => THRESHOLD_Q,
-            done => s_lif2_done, mem_out => open, spikes => spikes2
+            done => s_lif2_done, mem_out => dbg_mem2, spikes => spikes2
         );
 
 
@@ -142,6 +145,8 @@ begin
                     when IDLE =>
                         inf_done <= '0';
                         if start_infer = '1' then
+                            -- CRITICAL FIX: Reset scores before new inference
+                            score_vec <= (others => 0);
                             s_fc1_start <= '1';
                             state <= FC1_RUN;
                         end if;

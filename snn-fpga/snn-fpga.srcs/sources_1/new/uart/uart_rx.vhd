@@ -103,17 +103,21 @@ begin
               end if;
 
             when STOP =>
-              if samp_cnt < OVERSAMP - 1 then
+              -- CRITICAL FIX: Only wait for HALF the stop bit (OVERSAMP/2)
+              -- This ensures we are back in IDLE before the next Start bit arrives.
+              if samp_cnt < (OVERSAMP/2) then
                 samp_cnt := samp_cnt + 1;
               else
                 samp_cnt := 0;
-                -- sample stop bit, should be '1'
+                -- If line is high (Stop bit valid), latch the data
                 if rx_sync(2) = '1' then
                   rx_byte <= shift_reg;
                   rx_ready <= '1';
                 end if;
+                -- Go to IDLE immediately
                 state <= IDLE;
               end if;
+              
           end case;
         end if; -- sample_tick
       end if;

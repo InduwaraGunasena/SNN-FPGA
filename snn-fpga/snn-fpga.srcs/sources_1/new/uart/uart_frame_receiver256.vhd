@@ -13,7 +13,11 @@ entity uart_frame_receiver256 is
     rx          : in  std_logic;  -- UART RX
     tx          : out std_logic;  -- UART TX (ACK/NAK)
     frame_data  : out std_logic_vector(8*256-1 downto 0); -- payload bytes packed
-    frame_valid : out std_logic   -- pulse when new frame latched
+    frame_valid : out std_logic;   -- pulse when new frame latched
+    
+    -- NEW PORTS: Allow Top Level to send data (Prediction)
+    user_tx_data  : in std_logic_vector(7 downto 0);
+    user_tx_start : in std_logic
   );
 end entity;
 
@@ -31,12 +35,31 @@ architecture rtl of uart_frame_receiver256 is
   signal byte_idx : integer range 0 to 255 := 0;
 
   -- UART TX support
-  signal tx_byte_sig   : std_logic_vector(7 downto 0) := (others => '0');
-  signal tx_start_sig  : std_logic := '0';
-  signal tx_busy_sig   : std_logic := '0';
+  signal tx_byte_internal : std_logic_vector(7 downto 0) := (others => '0');
+  signal tx_start_internal: std_logic := '0';
+  signal tx_busy_sig      : std_logic := '0';
+
+  -- Combined signals (Multiplexer)
+  signal mux_tx_data  : std_logic_vector(7 downto 0);
+  signal mux_tx_start : std_logic;
 
 begin
 
+  -- MUX Logic: If Internal FSM wants to send (ACK), it wins. 
+  -- Otherwise, let User (Prediction) send.
+  -- Since ACK happens before Inference, they won't overlap.
+  process(tx_start_internal, tx_byte_internal, user_tx_start, user_tx_data)
+  begin
+      if tx_start_internal = '1' then
+          mux_tx_start <= '1';
+          mux_tx_data  <= tx_byte_internal;
+      else
+          mux_tx_start <= user_tx_start;
+          mux_tx_data  <= user_tx_data;
+      end if;
+  end process;
+  
+  
   -- instantiate uart_rx
   rx_inst: entity work.uart_rx
     generic map(CLK_FREQ => CLK_FREQ, BAUD => BAUD)
@@ -47,7 +70,8 @@ begin
   tx_inst: entity work.uart_tx
     generic map(CLK_FREQ => CLK_FREQ, BAUD => BAUD)
     port map(clk => clk, rst => rst,
-             tx_start => tx_start_sig, tx_byte => tx_byte_sig,
+             tx_start => mux_tx_start,  -- Use MUXed signal
+             tx_byte => mux_tx_data,    -- Use MUXed signal
              tx => tx, tx_busy => tx_busy_sig);
 
   -- main parsing process
@@ -58,7 +82,7 @@ begin
     if rising_edge(clk) then
       -- Default values
       ready_r      <= '0';
-      tx_start_sig <= '0'; 
+      tx_start_internal <= '0'; 
       -- tx_byte_sig holds previous value unless updated
       
       if rst = '1' then
@@ -66,7 +90,7 @@ begin
         byte_idx     <= 0;
         data_reg     <= (others => '0');
         sum_chk      := 0; -- Use := for variables
-        tx_byte_sig  <= (others => '0');
+        tx_byte_internal  <= (others => '0');
       
       else
         if rx_ready = '1' then
@@ -107,13 +131,13 @@ begin
             when CHECKSUM =>
               -- Verify checksum
               if to_integer(unsigned(rx_byte)) = sum_chk then
-                ready_r      <= '1';   -- Pulse valid
-                tx_byte_sig  <= x"06"; -- ACK
-                tx_start_sig <= '1';
+                ready_r      <= '1';
+                tx_byte_internal <= x"06"; -- ACK
+                tx_start_internal<= '1';
                 fstate       <= WAIT_P1;
               else
-                tx_byte_sig  <= x"15"; -- NAK
-                tx_start_sig <= '1';
+                tx_byte_internal <= x"15"; -- NAK
+                tx_start_internal<= '1';
                 fstate       <= WAIT_P1;
               end if;
               

@@ -53,24 +53,24 @@ begin
                         end if;
 
                     when COMPUTE_ACC =>
-                        -- MAC Operation: Accumulate (Weight * Input)
+                        -- Accumulate RAW products (No division here!)
+                        -- This matches Python: (W @ x)
                         if col_idx < N_IN_G then
-                            acc <= acc + (WEIGHTS_G(row_idx, col_idx) * x_in(col_idx)) / Q_SCALE;
+                            acc <= acc + (WEIGHTS_G(row_idx, col_idx) * x_in(col_idx));
                             col_idx <= col_idx + 1;
                         else
-                            -- Column loop finished, add bias
                             state <= WRITE_RESULT;
                         end if;
 
                     when WRITE_RESULT =>
-                        -- Store result + bias
-                        z_out(row_idx) <= acc + BIAS_G(row_idx);
-                        
-                        -- Check if we are done with all neurons
+                        -- Apply Division/Scaling HERE, once per neuron.
+                        -- Use shift_right (Arithmetic Shift) to perform floor division for negative numbers
+                        -- Formula: (acc // 256) + bias
+                        z_out(row_idx) <= to_integer(shift_right(to_signed(acc, 32), 8)) + BIAS_G(row_idx);
+
                         if row_idx = N_OUT_G - 1 then
                             state <= FINISHED;
                         else
-                            -- Setup for next neuron
                             row_idx <= row_idx + 1;
                             col_idx <= 0;
                             acc     <= 0;

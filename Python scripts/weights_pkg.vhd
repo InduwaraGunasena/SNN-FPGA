@@ -22,7 +22,7 @@ package weights_pkg is
 
   -- LIF / neuron parameters (quantized in same Q format)
   constant LIF_BETA_Q  : integer := 230;  -- beta * Q_SCALE
-  constant THRESHOLD_Q : integer := 230;  -- threshold * Q_SCALE
+  constant THRESHOLD_Q : integer := 256;  -- threshold * Q_SCALE
 
   -- Weight matrices (quantized integers, clipped to int16 range)
   constant W_INPUT_HIDDEN : int_matrix_t(0 to 63, 0 to 255) := (

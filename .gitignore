@@ -2,7 +2,8 @@ snn-fpga/snn-fpga.sim/
 snn-fpga/snn-fpga.ip_user_files/
 snn-fpga/snn-fpga.cache/
 snn-fpga/snn-fpga.hw/
-snn-fpga/snn-fpga.runs/
+snn-fpga/snn-fpga.runs/*
+!snn-fpga/snn-fpga.runs/impl_1/top_fpga.bit
 
 snn-fpga/snn-fpga.hw/snn-fpga.lpr
 
@@ -15,5 +16,8 @@ Python scripts/snn_floats_weights.npz
 Python scripts/snn_floats_model.pth
 Python scripts/snn_qat_model.pth
 Python scripts/data/
+Python scripts/__pycache__/
+Python scripts/temp/
 
-snn-fpga1/
+snn-fpga/tb_fc_layer_seq_behav.wcfg
+snn-fpga/tb_snn_core_behav.wcfg
