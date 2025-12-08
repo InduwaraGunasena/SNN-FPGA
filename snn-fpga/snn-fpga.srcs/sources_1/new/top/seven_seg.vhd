@@ -1,7 +1,3 @@
--- ============================================================
--- File: hw/vhdl/top/sevenseg.vhd
--- Purpose: simple 1-digit 7-segment driver mapping 0..9 to segments
--- ============================================================
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.NUMERIC_STD.ALL;

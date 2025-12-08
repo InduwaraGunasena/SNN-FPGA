@@ -1,7 +1,3 @@
--- ============================================================
--- File: hw/vhdl/packages/types_pkg.vhd
--- Purpose: common types, fixed-point constants, helper functions
--- ============================================================
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.NUMERIC_STD.ALL;
