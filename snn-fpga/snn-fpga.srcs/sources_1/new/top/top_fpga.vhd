@@ -128,10 +128,10 @@ begin
     led(3 downto 0) <= std_logic_vector(to_unsigned(result, 4));
     
     -- LED 4-7: Always OFF (Separator)
-    led(7 downto 4) <= "0000";
+    led(6 downto 4) <= "000";
     
     -- LED 8-14: Input Image Checksum (Verifies new image received)
-    led(14 downto 8) <= std_logic_vector(input_checksum(6 downto 0));
+    led(14 downto 7) <= std_logic_vector(input_checksum);
     
     -- LED 15: Done Toggle (Changes state every time inference finishes)
     led(15) <= led_done_toggle;
