@@ -1,154 +1,166 @@
-# Spiking Neural Network on FPGA for Handwritten Digit Recognition
+# Real-Time Handwritten Digit Recognition using Spiking Neural Networks on FPGA
+
+Welcome to the **SNN-FPGA** project\! This repository hosts a complete hardware-software co-design system that implements a Spiking Neural Network (SNN) on a **Digilent Basys 3 FPGA**.
+
+Our goal was to bridge the gap between biological inspiration and hardware efficiency. By mimicking the spiking behavior of biological neurons, this project demonstrates how neural networks can be deployed in resource-constrained embedded systems using VHDL.
+
+**Key Features:**
+
+  * **Real-Time Interaction:** Users draw digits on a Python GUI, and the FPGA classifies them instantly.
+  * **Efficient Design:** Uses a custom sequential architecture to fit a neural network onto a small Artix-7 FPGA.
+  * **Hardware-Software Loop:** Features a robust UART communication pipeline connecting the host PC and the FPGA.
 
 -----
 
-Our project involves implementing a Spiking Neural Network (SNN) on an FPGA for real-time handwritten digit recognition using VHDL. The SNN mimics the spiking behavior of biological neurons, addressing the demand for efficient and low-power neural network solutions in embedded systems. Designed with VHDL to leverage FPGA capabilities, our model undergoes a crucial training phase in Python for weight calculation, data normalization, evaluation, experimentation, and testing. Users can write digits in a pixel grid and get the inference in real-time on a 7-segment display. The model communicates via a UART interface to share pixel grid data between the FPGA and the host machine.
-
 ## Project Layout
 
-```
+```text
 SNN-FPGA/
 ├─ README.md
 ├─ snn-fpga/snn-fpga.srcs
 │  ├─ sources_1/new/
 │  │  ├─ packages/
 │  │  │  ├─ types_pkg.vhd       # Custom integer vector/matrix types
-│  │  │  └─ weights_pkg.vhd     # (Generated) Quantized Model Weights & Biases
+│  │  │  └─ weights_pkg.vhd     # (Auto-Generated) Quantized Model Weights & Biases
 │  │  ├─ layers/
 │  │  │  ├─ fc_layer_seq.vhd    # Fully Connected Layer (Sequential Logic)
 │  │  │  └─ lif_array_seq.vhd   # Array of Leaky Integrate-and-Fire Neurons
 │  │  ├─ top/
-│  │  │  ├─ snn_core.vhd        # SNN controller: Manages layer sequencing
+│  │  │  ├─ snn_core.vhd        # SNN Controller: Manages layer sequencing
 │  │  │  ├─ seven_seg.vhd       # 7-Segment Display Driver
-│  │  │  └─ top_fpga.vhd        # Top-level entity: Clock divider, UART & SNN orchestration
+│  │  │  └─ top_fpga.vhd        # Top-Level: Clock divider, UART & SNN orchestration
 │  │  └─ uart/
-│  │     ├─ uart_frame_receiver256.vhd    # Frame Logic: Buffers 256 bytes, Handles Checksum
-│  │     ├─ uart_rx.vhd                   # UART Byte Receiver (Oversampled)
-│  │     └─ uart_tx.vhd                   # UART Byte Transmitter
+│  │     ├─ uart_frame_receiver256.vhd    # Buffers 256 bytes & handles Checksum
+│  │     ├─ uart_rx.vhd                   # UART Receiver (Oversampled)
+│  │     └─ uart_tx.vhd                   # UART Transmitter
 │  ├─ constrs_1/imports/Downloads/
 │  │  └─ Basys3Labs.xdc         # Pin constraints for Basys-3
 │  └─ sim_1/new
-│     ├─ tb_fc_layer.vhd        # Testbench: fc_layer + neuron_array
-│     └─ tb_snn_core.vhd        # Testbench: integrated SNN core (no IO)
+│     ├─ tb_fc_layer.vhd        # Testbench: Layer logic verification
+│     └─ tb_snn_core.vhd        # Testbench: Full SNN core verification
 └─ Python scripts/
-   ├─ sample MNIST data         # Sample dataset for testing purposes
-   ├─ input_interface.py        # Main GUI application for drawing & testing
-   ├─ snn_test.ipynb            # Train, test, and evaluate the SNN model in Python environment
-   └─ weights_pkg.vhd           # Sample weight and parameter file ready to move to VHDL
+   ├─ sample MNIST data         # Test images
+   ├─ input_interface.py        # GUI for drawing digits & communicating with FPGA
+   ├─ snn_test.ipynb            # Jupyter Notebook: Train, Quantize, Evaluate & Export
+   └─ weights_pkg.vhd           # Sample weights file (Reference)
 ```
 
 > [\!NOTE]
-> I built the SNN in the Python environment first. The workflow began with the contents in **Python scripts**, where I trained, evaluated, and experimented with the SNN model before finally testing it.
-> Subsequently, I used Vivado 2018.1 to develop the FPGA model. Therefore, the **snn-fpga** directory contains all files related to the SNN model implementation on the FPGA.
+> **Development Workflow:**
+> This project was built in two phases. First, the SNN was designed, trained, and verified entirely in **Python** (see *Python scripts*). Once the model logic was proven and the weights were exported, I moved to **Vivado** to implement the hardware logic (see *snn-fpga*).
 
-## Model Design
+-----
 
-### Introduction to Spiking Neural Networks (SNNs)
+## Understanding the Model
 
-Spiking Neural Networks (SNNs) represent the third generation of neural networks, designed to bridge the gap between machine learning and neuroscience. Unlike traditional Artificial Neural Networks (ANNs) that communicate using continuous numerical values (activations), SNNs operate using discrete events called "spikes," much like biological brains.
+### Why Spiking Neural Networks?
 
-[Image of Biological neuron vs Spiking neuron]
+Spiking Neural Networks (SNNs) represent the third generation of neural networks. Unlike standard Artificial Neural Networks (ANNs) that constantly multiply floating-point numbers, SNNs operate on discrete events called **"spikes"**—much like the biological brain.
 
-In an SNN, information is encoded in the timing and frequency of these spikes. Neurons accumulate voltage over time and only transmit a signal when a specific threshold is reached. This temporal dynamic allows SNNs to process time-series data efficiently and offers significant potential for energy efficiency, as computations are event-driven rather than continuous.
+<p align="center">
+<img src="/images/ANN vs SNN.jpg" alt="ANN vs SNN" width="500"/>
+<br><sub>Figure: Illustration of neural networks: (left) an ANN, where each neuron processes real numbers; and (right) an SNN, where dynamic spiking neurons process and communicate binary sparse spiking signals over time.<sub>
+<br><em><sub>Resource: <a href="https://blogs.kcl.ac.uk/kclip/files/2019/08/prob_snn_KCLIP_0.jpg">https://blogs.kcl.ac.uk/kclip/files/2019/08/prob_snn_KCLIP_0.jpg</a></sub></em>
+</p>
 
-### Project Architecture
 
-The primary goal of this project is to classify handwritten digits from 0 to 9 using the MNIST dataset. However, standard MNIST images are 28x28 pixels, which results in an input layer of 784 neurons. Given the limited logic and memory resources of the Digilent Basys 3 FPGA (Artix-7), a full-scale implementation was not feasible.
+In our model, information isn't just a static value; it is encoded in the timing and accumulation of signals. Neurons build up electrical potential over time and only "fire" (send a signal) when they cross a specific threshold. This event-driven approach is what makes SNNs incredibly promising for energy-efficient hardware.
 
-To address this, we optimized the architecture as follows:
+### Adapting MNIST for FPGA
 
-  * **Input Downsampling:** We downsampled the MNIST dataset to **16x16 pixels**, reducing the input layer to 256 neurons.
-  * **Network Topology:** After experimenting with various multi-layer architectures, we determined that a single hidden layer provided the best balance between accuracy and resource usage.
-  * **Final Structure:** The model consists of a **256-64-10** architecture:
-      * **Input Layer:** 256 neurons (receiving pixel intensity as current).
-      * **Hidden Layer:** 64 Leaky Integrate-and-Fire (LIF) neurons.
-      * **Output Layer:** 10 LIF neurons (representing digits 0-9).
+We aimed to classify digits using the famous **MNIST dataset**. However, standard MNIST images are 28x28 pixels (784 inputs). For the Basys 3 FPGA, which has limited logic cells and memory, a fully connected network of that size was too expensive.
 
-### Core Concepts & Implementation
+We optimized the architecture to fit the hardware constraints:
 
-To successfully port the SNN to hardware, several specific design choices were made:
+1.  **Downsampling:** We reduced input images to **16x16 pixels** (256 inputs).
+2.  **Lean Topology:** After substantial experimentation, we found that a single hidden layer offered the best trade-off between accuracy and resource usage.
+3.  **Final Architecture:** **256 Input $\rightarrow$ 64 Hidden (LIF) $\rightarrow$ 10 Output (LIF)**.
 
-  * **Temporal Simulation (`num_steps=20`):** SNNs require time to integrate information. We simulate the network for 20 time steps per inference. This duration is sufficient for the spiking dynamics to settle and produce a reliable classification without introducing excessive latency.
-  * **Leaky Integrate-and-Fire (LIF) Neurons:** We utilized LIF neurons because they introduce a "leak" term. This mimics biological memory—if a neuron doesn't receive enough input quickly, its potential decays, preventing old noise from triggering false spikes.
-  * **Quantization (Q8.8):** Floating-point arithmetic is computationally expensive on FPGAs. We implemented **Q8.8 fixed-point arithmetic**, where 8 bits are used for the integer part and 8 bits for the fractional part. This allows us to perform calculations using standard integer logic while maintaining enough precision for the neural network weights.
+### Key Technical Decisions
 
-### Python Workflow
+To bridge the gap between Python simulation and VHDL synthesis, we made three critical design choices:
 
-The `snn_test.ipynb` notebook serves as the development hub for the model:
+  * **Temporal Simulation (20 Steps):** SNNs need "time" to think. We simulate the network for 20 time steps per inference. This gives the spiking dynamics enough time to settle and produce a clear prediction without causing noticeable lag for the user.
+  * **The "Leaky" Neuron:** We use Leaky Integrate-and-Fire (LIF) neurons. The "leak" ensures that if a neuron stops receiving input, its potential gradually decays. This acts like a short-term memory filter, preventing old noise from triggering false detections.
+  * **Quantization (Q8.8):** FPGAs struggle with floating-point math. We implemented **Q8.8 Fixed-Point Arithmetic** (8 bits integer, 8 bits fraction). This allows us to run the neural network using standard integer logic gates while maintaining the precision needed for accurate weights.
 
-1.  **Preprocessing:** Raw MNIST images are resized to 16x16, normalized, and centered (center-of-mass) to match the GUI input format.
-2.  **Training:** The model is built using PyTorch and `snntorch`. It is trained using backpropagation through time (BPTT).
-3.  **Fine-Tuning & Quantization:** We employ quantization-aware training to simulate the effects of Q8.8 fixed-point arithmetic, ensuring the model's accuracy doesn't drop when moved to the FPGA.
-4.  **Evaluation:** The model is tested against a validation set to ensure robustness.
-5.  **Export:** Finally, the trained weights and biases are exported into a VHDL package file (`weights_pkg.vhd`), ready for synthesis.
+### The Python Training Pipeline
 
-## FPGA Design
+The `snn_test.ipynb` notebook is the "brain" behind the hardware. It handles:
 
-The FPGA implementation is divided into two major subsystems: the **SNN Core** (computation) and the **UART Interface** (communication).
+1.  **Preprocessing:** Resizing and centering raw images to match the FPGA's input format.
+2.  **Training:** Using `snntorch` to train the model via Backpropagation Through Time (BPTT).
+3.  **Quantization-Aware Training:** Fine-tuning the model to survive the conversion from Float32 to Int8.
+4.  **Export:** Generating the VHDL package `weights_pkg.vhd`, effectively "burning" the learned brain into the FPGA's memory.
 
-### SNN Core & Sequential Logic
+-----
 
-The SNN core is responsible for executing the neural network inference. Due to the limited number of DSP slices and Block RAM on the Basys 3, a fully parallel implementation (where every neuron updates simultaneously) is impossible. Instead, we utilized a **sequential processing approach**:
+## Hardware Implementation
 
-  * **Sequential Matrix Multiplication:** The Fully Connected (FC) layers compute neuron activations one by one. A single Multiply-Accumulate (MAC) unit iterates through the weights stored in distributed ROM.
-  * **State Management:** The membrane potentials of the 64 hidden neurons and 10 output neurons are stored in registers. In every time step, the system reads the current potential, adds the input current, applies the decay factor (beta), checks for a threshold crossing (spike), and writes the new potential back.
-  * **Clocking:** To ensure timing stability for the large combinational paths involved in the weight matrix access, the system clock is divided down to **25 MHz**.
+The FPGA design is split into the **SNN Core** (the brain) and the **UART Interface** (the nervous system).
 
-### UART Communication
+### The SNN Core: Sequential Processing
 
-Real-time interaction is achieved via a custom UART interface running at **115200 baud**.
+On a small FPGA, we cannot update all neurons in parallel (that would require hundreds of multipliers). Instead, we designed a **Sequential Processor**:
 
-  * **Reception:** The `uart_frame_receiver256` module buffers the incoming 256 bytes (representing the 16x16 pixel grid).
-  * **Synchronization:** It handles clock domain crossing and validates the integrity of the data frame using a checksum. If the checksum matches, a "valid" signal triggers the SNN inference.
-  * **Transmission:** Once inference is complete, the predicted class is sent back to the host PC, and the result is simultaneously displayed on the 7-segment display.
+  * **Matrix Multiplication:** A single Multiply-Accumulate (MAC) unit iterates through the weights stored in distributed ROM, calculating neuron inputs one by one.
+  * **State Management:** The membrane potential of every neuron is stored in a register array. In every clock cycle, the system reads a neuron's state, adds new input, applies the leak, and checks for a spike.
 
-### Simulation
+### UART Communication Bridge
 
-The project includes VHDL testbenches to verify functionality before synthesis:
+To interact with the model, we built a custom UART interface running at **115200 baud**.
 
-  * **`tb_fc_layer.vhd`:** Tests individual layer logic to ensure the sequential MAC operations and neuron updates match Python outputs.
-  * **`tb_snn_core.vhd`:** Simulates the entire network flow (Input $\rightarrow$ Hidden $\rightarrow$ Output) over 20 time steps. Developers can copy input vectors from the Python debug script into this testbench to verify bit-accurate compatibility between the Python simulation and VHDL logic.
+  * **The Packet:** The host sends a 256-byte packet (the image).
+  * **Validation:** The FPGA calculates a checksum as data arrives. The SNN only runs if the checksum matches, ensuring no corrupted data affects the prediction.
+  * **Feedback:** Once the SNN finishes, it sends the predicted digit back to the PC and updates the 7-segment display.
 
-## Model Performance
+-----
 
-The performance of the FPGA implementation is evaluated based on the number of clock cycles required to complete one inference pass (20 time steps).
+## Performance Analysis
 
-### Resource & Latency Estimation
+We evaluate performance based on the clock cycles needed for one full inference (20 time steps).
 
-The design uses a single MAC unit per layer to conserve resources. The cycle count per time step is calculated as follows:
+### Resource & Latency
 
-  * **FC1 Layer (Input to Hidden):**
-      * $64 \text{ neurons} \times 256 \text{ inputs} = 16,384 \text{ cycles}$
-  * **LIF1 Update:**
-      * $\approx 64 \text{ cycles}$ (Sequential update of hidden neurons)
-  * **FC2 Layer (Hidden to Output):**
-      * $10 \text{ neurons} \times 64 \text{ inputs} = 640 \text{ cycles}$
-  * **LIF2 Update:**
-      * $\approx 10 \text{ cycles}$ (Sequential update of output neurons)
+Since we serialize the math (using one multiplier per layer), the cycle count is deterministic:
 
-**Total Cycles per Time Step:**
-<br>
-$$16,384 + 64 + 640 + 10 \approx 17,098 \text{ cycles}$$
+  * **FC1 Layer:** $64 \text{ neurons} \times 256 \text{ inputs} = 16,384 \text{ cycles}$
+  * **FC2 Layer:** $10 \text{ neurons} \times 64 \text{ inputs} = 640 \text{ cycles}$
+  * **Overhead:** $\approx 74 \text{ cycles}$ for neuron updates.
 
-**Total Cycles per Inference (20 Steps):**
-<br>
-$$17,098 \times 20 \approx 341,960 \text{ cycles}$$
+**Total per Time Step:** $\approx 17,098 \text{ cycles}$
+**Total per Inference (20 Steps):** $\approx 341,960 \text{ cycles}$
 
 ### Latency Calculation
 
 Running on a system clock of **25 MHz**:
-<br>
-$$\text{Latency} = \frac{\text{Total Cycles}}{\text{Clock Frequency}} = \frac{341,960}{25 \times 10^6} \approx \mathbf{13.68 \text{ ms}}$$
 
-This latency ($\approx 13.7$ ms) allows for approximately **73 inferences per second**, which is well within the requirements for a real-time user interface where human reaction time is significantly slower.
+$$\text{Latency} = \frac{341,960}{25 \times 10^6} \approx \mathbf{13.68 \text{ ms}}$$
+
+This results in \~73 predictions per second. For a human writing digits on a screen, this is effectively instantaneous.
+
+> [\!WARNING]
+> **Why 25 MHz instead of 100 MHz?**
+> You might notice the Basys 3 has a 100 MHz oscillator, but we divide it down to 25 MHz.
+> The SNN logic involves a long **combinational path**: reading a weight from ROM $\rightarrow$ multiplying by input $\rightarrow$ adding to a 32-bit accumulator. This logic chain takes longer than 10 nanoseconds (the period of a 100 MHz clock) to stabilize. Running at 100 MHz causes **timing violations**, leading to unstable or random predictions. Slowing to 25 MHz gives the signals 40 nanoseconds to propagate, ensuring stable and accurate results.
+
+-----
 
 ## Future Prospects
 
-There are several avenues to improve and expand this project:
+This project is a functional proof-of-concept, but there is plenty of room to scale. Here is how we plan to evolve the design:
 
-  * **Parallelism:** Implementing multiple MAC units (e.g., 4 or 8 in parallel) would linearly reduce the latency, potentially allowing for higher clock speeds or larger networks.
-  * **Pipelining:** Pipelining the FC layers and neuron updates could allow the processing of the next time step to begin before the current one finishes.
-  * **Deep SNNs:** Utilizing external DDR memory to store weights would allow for multi-layer architectures (Deep SNNs) beyond the current BRAM limitations.
-  * **On-Chip Learning:** Implementing Spike-Timing-Dependent Plasticity (STDP) to allow the FPGA to learn from the user's handwriting in real-time without needing Python training.
+  * **Parallelism (Multi-MAC)**
+      * *Current:* We use 1 MAC unit, processing one weight at a time.
+      * *Future:* Implementing 4 or 8 parallel MAC units would cut the latency by 4x or 8x, allowing us to process larger images or more complex networks in the same amount of time.
+  * **Pipelining**
+      * *Current:* Layer 2 waits for Layer 1 to finish completely.
+      * *Future:* Pipelining would allow Layer 2 to start processing the first neuron as soon as Layer 1 finishes it, significantly increasing throughput.
+  * **Deep SNNs via DDR Memory**
+      * *Current:* Weights are stored in FPGA Logic (BRAM/Distributed RAM), which has very small capacity. This limits us to 1 hidden layer.
+      * *Future:* Fetching weights from external DDR memory would allow for Deep Neural Networks with millions of parameters.
+  * **On-Chip Learning (STDP)**
+      * *Current:* The FPGA is "inference-only." It cannot learn new things; it only knows what it was trained on in Python.
+      * *Future:* Implementing Spike-Timing-Dependent Plasticity (STDP) would allow the FPGA to update its own weights, enabling it to learn your specific handwriting style in real-time.
 
 -----
