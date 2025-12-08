@@ -33,8 +33,12 @@ architecture rtl of top_fpga is
     signal inf_done       : std_logic;
     signal result         : integer range 0 to 9;
     
+    -- NEW SIGNALS FOR SENDING RESULT BACK
+    signal pred_tx_data   : std_logic_vector(7 downto 0) := (others => '0');
+    signal pred_tx_start  : std_logic := '0';
+    
     -- Control FSM
-    type t_ctrl_state is (IDLE, ASSERT_RESET, START_INFER, WAIT_STABLE, WAIT_DONE);
+    type t_ctrl_state is (IDLE, ASSERT_RESET, START_INFER, WAIT_STABLE, WAIT_DONE, SEND_RESULT);
     signal ctrl_state : t_ctrl_state := IDLE;
         
     -- Display signals
@@ -72,7 +76,9 @@ begin
         rx          => RsRx,
         tx          => RsTx,         -- Connects to Basys 3 TX pin
         frame_data  => uart_data_flat,
-        frame_valid => uart_valid
+        frame_valid => uart_valid,
+        user_tx_data  => pred_tx_data,
+        user_tx_start => pred_tx_start
     );
 
     -- 2. Data Conversion Process (Bit Vector -> Integer Array)
@@ -86,6 +92,7 @@ begin
                 when IDLE =>
                     start_inf <= '0';
                     core_rst  <= '0'; 
+                    pred_tx_start <= '0'; -- Ensure Low
 
                     if uart_valid = '1' then
                         -- 1. Unpack data immediately
@@ -137,8 +144,14 @@ begin
                     start_inf <= '0';
                     if inf_done = '1' then
                         led_done_toggle <= not led_done_toggle;
-                        ctrl_state <= IDLE;
+                        ctrl_state <= SEND_RESULT;
                     end if;
+                    
+                -- Send the result byte via UART
+                when SEND_RESULT =>
+                    pred_tx_data  <= std_logic_vector(to_unsigned(result, 8));
+                    pred_tx_start <= '1'; -- Pulse start
+                    ctrl_state <= IDLE;   -- Return to IDLE (pulse lasts 1 cycle, which is perfect)
             end case;
         end if;
     end process;
