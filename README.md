@@ -59,8 +59,10 @@ Spiking Neural Networks (SNNs) represent the third generation of neural networks
 
 <p align="center">
 <img src="/images/ANN vs SNN.jpg" alt="ANN vs SNN" width="500"/>
-<br><sub>Figure: Illustration of neural networks: (left) an ANN, where each neuron processes real numbers; and (right) an SNN, where dynamic spiking neurons process and communicate binary sparse spiking signals over time.<sub>
-<br><em><sub>Resource: <a href="https://blogs.kcl.ac.uk/kclip/files/2019/08/prob_snn_KCLIP_0.jpg">https://blogs.kcl.ac.uk/kclip/files/2019/08/prob_snn_KCLIP_0.jpg</a></sub></em>
+<br>
+<sub>Figure: Illustration of neural networks: (left) an ANN, where each neuron processes real numbers; and (right) an SNN, where dynamic spiking neurons process and communicate binary sparse spiking signals over time.</sub>
+<br>
+<em><sub>Resource: <a href="https://blogs.kcl.ac.uk/kclip/files/2019/08/prob_snn_KCLIP_0.jpg">https://blogs.kcl.ac.uk/kclip/files/2019/08/prob_snn_KCLIP_0.jpg</a></sub></em>
 </p>
 
 
@@ -70,11 +72,25 @@ In our model, information isn't just a static value; it is encoded in the timing
 
 We aimed to classify digits using the famous **MNIST dataset**. However, standard MNIST images are 28x28 pixels (784 inputs). For the Basys 3 FPGA, which has limited logic cells and memory, a fully connected network of that size was too expensive.
 
+<p align="center">
+<img src="/images/Basys 3 resources.png" alt="Basys 3 resources" width="500"/>
+<br>
+<sub>Figure: Hardware resources available in Basys 3</sub>
+<br>
+<em><sub>Resource: <a href="https://www.amd.com/content/dam/amd/en/documents/university/aup-boards/XUPBasys3/documentation/Basys3_rm_8_22_2014.pdf">https://www.amd.com/content/dam/amd/en/documents/university/aup-boards/XUPBasys3/documentation/Basys3_rm_8_22_2014.pdf</a></sub></em>
+</p>
+
 We optimized the architecture to fit the hardware constraints:
 
 1.  **Downsampling:** We reduced input images to **16x16 pixels** (256 inputs).
 2.  **Lean Topology:** After substantial experimentation, we found that a single hidden layer offered the best trade-off between accuracy and resource usage.
 3.  **Final Architecture:** **256 Input $\rightarrow$ 64 Hidden (LIF) $\rightarrow$ 10 Output (LIF)**.
+
+<p align="center">
+<img src="/images/Architecture.png" alt="SNN Block diagram" width="500"/>
+<br>
+<sub>Figure: Block diagram of the SNN Architecture</sub>
+</p>
 
 ### Key Technical Decisions
 
@@ -113,6 +129,13 @@ To interact with the model, we built a custom UART interface running at **115200
   * **The Packet:** The host sends a 256-byte packet (the image).
   * **Validation:** The FPGA calculates a checksum as data arrives. The SNN only runs if the checksum matches, ensuring no corrupted data affects the prediction.
   * **Feedback:** Once the SNN finishes, it sends the predicted digit back to the PC and updates the 7-segment display.
+
+
+<p align="center">
+<img src="/images/Hardware Architecture.png" alt="Block diagram of the SNN in FPGA" width="500"/>
+<br>
+<sub>Figure: Block diagram of the SNN in FPGA</sub>
+</p>
 
 -----
 
