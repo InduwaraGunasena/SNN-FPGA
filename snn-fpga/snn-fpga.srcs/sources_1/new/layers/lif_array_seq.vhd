@@ -1,4 +1,3 @@
--- hw/vhdl/neurons/lif_array_seq.vhd
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.NUMERIC_STD.ALL;
@@ -48,7 +47,8 @@ begin
                     idx <= 0;
                 elsif running = '1' then
                     if idx < N_NEURONS_G then
-                        vtmp := (beta_q * mem_array(idx)) / Q_SCALE + cur_in(idx);
+                        -- vtmp := (beta_q * mem_array(idx)) / Q_SCALE + cur_in(idx);
+                        vtmp := to_integer(shift_right(to_signed(beta_q * mem_array(idx), 32), Q_FRAC_BITS)) + cur_in(idx);
                         if vtmp > threshold then
                             spikes_s(idx) <= '1';
                             mem_array(idx) <= vtmp - threshold;
