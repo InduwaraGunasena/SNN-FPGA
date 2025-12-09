@@ -5,7 +5,7 @@ Welcome to the **SNN-FPGA** project\! This repository hosts a complete hardware-
 Our goal was to bridge the gap between biological inspiration and hardware efficiency. By mimicking the spiking behavior of biological neurons, this project demonstrates how neural networks can be deployed in resource-constrained embedded systems using VHDL.
 
 <p align="center">
-<img src="/images/img.gif" alt="working model" width="500"/>
+<img src="/images/img.gif" alt="working model" height="500"/>
 </p>
 
 **Key Features:**
