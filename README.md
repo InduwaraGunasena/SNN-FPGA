@@ -8,12 +8,14 @@ Our goal was to bridge the gap between biological inspiration and hardware effic
 <img src="/images/img.gif" alt="working model" width="500"/>
 </p>
 
-
 **Key Features:**
 
   * **Real-Time Interaction:** Users draw digits on a Python GUI, and the FPGA classifies them instantly.
   * **Efficient Design:** Uses a custom sequential architecture to fit a neural network onto a small Artix-7 FPGA.
   * **Hardware-Software Loop:** Features a robust UART communication pipeline connecting the host PC and the FPGA.
+
+> [\!NOTE]
+> Watch the demo video of this project: https://www.youtube.com/shorts/KOD3Yp8Q4VM 
 
 -----
 
