@@ -11,7 +11,7 @@ entity fc_layer_seq is
         BIAS_G        : int_vector_t;
         N_IN_G        : integer;
         N_OUT_G       : integer;
-        PARALLELISM_G : integer := 8  -- Default to 8 parallel MACs
+        PARALLELISM_G : integer := 64  -- Default to 64 parallel MACs
     );
     port(
         clk   : in  std_logic;

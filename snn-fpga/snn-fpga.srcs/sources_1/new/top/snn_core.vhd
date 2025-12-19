@@ -65,7 +65,7 @@ begin
             BIAS_G        => B_INPUT_HIDDEN,
             N_IN_G        => N_INPUTS,
             N_OUT_G       => N_HIDDEN,
-            PARALLELISM_G => 8
+            PARALLELISM_G => 64
         )
         port map (
             clk   => clk,
@@ -92,7 +92,7 @@ begin
             BIAS_G        => B_HIDDEN_OUTPUT,
             N_IN_G        => N_HIDDEN,
             N_OUT_G       => N_OUTPUT,
-            PARALLELISM_G => 8
+            PARALLELISM_G => 64
         )
         port map (
             clk   => clk,
