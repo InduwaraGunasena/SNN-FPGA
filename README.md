@@ -152,20 +152,22 @@ We evaluate performance based on the clock cycles needed for one full inference 
 
 ### Resource & Latency
 
-Since we serialize the math (using one multiplier per layer), the cycle count is deterministic:
+With the implementation of **64-way Parallelism**, the math is parallelized (using 64 DSP slices), drastically reducing the cycle count:
 
-  * **FC1 Layer:** $64 \text{ neurons} \times 256 \text{ inputs} = 16,384 \text{ cycles}$
-  * **FC2 Layer:** $10 \text{ neurons} \times 64 \text{ inputs} = 640 \text{ cycles}$
-  * **Overhead:** $\approx 74 \text{ cycles}$ for neuron updates.
+  * **FC1 Layer:** $64 \text{ neurons} \times (256 \text{ inputs} / 64) = 256 \text{ cycles}$
+  * **FC2 Layer:** $10 \text{ neurons} \times (64 \text{ inputs} / 64) = 10 \text{ cycles}$
+  * **LIF & Overhead:** $\approx 160 \text{ cycles}$ per step.
 
-**Total per Time Step:** $\approx 17,098 \text{ cycles}$
-**Total per Inference (20 Steps):** $\approx 341,960 \text{ cycles}$
+**Total per Time Step:** $\approx 426 \text{ cycles}$
+**Total per Inference (20 Steps):** $\approx 8,525 \text{ cycles}$
 
 ### Latency Calculation
 
 Running on a system clock of **25 MHz**:
 
-$$\text{Latency} = \frac{341,960}{25 \times 10^6} \approx \mathbf{13.68 \text{ ms}}$$
+$$\text{Latency} = \frac{8,525}{25 \times 10^6} \approx \mathbf{0.341 \text{ ms}}$$
+
+This represents a **40x speedup** over the sequential design (13.68 ms). The inference is effectively instantaneous.
 
 This results in \~73 predictions per second. For a human writing digits on a screen, this is effectively instantaneous.
 
