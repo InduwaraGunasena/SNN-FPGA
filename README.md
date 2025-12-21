@@ -190,6 +190,34 @@ The design was synthesized for the Basys 3 (Artix-7 XC7A35T). The table below su
 
 * **IO Usage (28%) & FF (22%):** Input/Output (LEDs, UART) and Flip-Flop usage remains moderate, indicating that the design is primarily constrained by combinational logic and multipliers.
 
+### Timing Analysis
+
+<p align="center">
+<img src="/images/Design_Timing _Summary.jpg" alt="Design Timing Summary" width="800"/>
+<br>
+<sub>Figure: Post-Implementation Timing Summary</sub>
+</p>
+
+The timing report confirms that the design operates reliably at the target frequency of **25 MHz**.
+
+*   **Worst Negative Slack (WNS): +7.984 ns**
+    *   This is the most critical metric. A positive WNS of ~8 ns means the signal arrives comfortably before the next clock edge.
+    *   Since our clock period is 40 ns (25 MHz), this large margin indicates we could theoretically run the design even faster (up to ~31 MHz) without errors.
+
+*   **Worst Hold Slack (WHS): +0.492 ns**
+    *   This confirms that signals do not change too quickly, preventing race conditions where data might pass through a flip-flop before it's safely latched.
+    *   Zero failing endpoints across both Setup and Hold checks certifies the hardware stability.
+
+### Physical Layout
+
+<p align="center">
+<img src="/images/Implemented_Design.jpeg" alt="Implemented Design Floorplan" width="600"/>
+<br>
+<sub>Figure: Physical Floorplan of the Implementation</sub>
+</p>
+
+The image above shows the actual physical layout of the design on the Artix-7 FPGA. The densely packed regions (teal/green) represent the Slice Logic (LUTs and FFs) used for the neural network computations, while the specific rectangular blocks correspond to the DSP slices utilized for the parallel Multiply-Accumulate operations. 
+
 -----
 
 ## Future Prospects
