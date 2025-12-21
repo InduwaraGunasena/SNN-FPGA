@@ -179,14 +179,16 @@ This results in \~73 predictions per second. For a human writing digits on a scr
 The design was synthesized for the Basys 3 (Artix-7 XC7A35T). The table below summarizes the post-implementation resource utilization:
 
 <p align="center">
-<img src="/images/model summary.png" alt="Model summary" width="500"/>
+<img src="/images/Resource_Utilization.jpg" alt="Model summary" width="600"/>
 <br>
 <sub>Figure: SNN Model summary</sub>
 </p>
 
-* LUT(Look-Up Tables) Usage (35.5%): This is our primary constraint. Since we store the model weights in distributed ROM (logic slices) rather than dedicated Block RAM, the LUT usage is relatively high. This simplifies memory access but limits the maximum size of the network we can fit on this specific chip.
+* **DSP (Digital Signal Processors) Usage (96%):** This is the most critical change. We have implemented **64 Parallel MAC units**, which consumes almost every available DSP slice on the Artix-7 chip. This massive parallelism allows us to process 64 weights per clock cycle, drastically reducing latency but pushing the hardware to its arithmetic limit.
 
-* DSP(Digital Signal Processors) Usage (11.1%): We only consume 10 DSP slices because our sequential design efficiently reuses the same multipliers for every neuron. A fully parallel design would likely exhaust these DSPs, but our approach leaves plenty of room for future arithmetic expansions.
+* **LUT (Look-Up Tables) Usage (76%):** The utilization has increased significantly compared to the sequential version. This is required to support the parallel adder trees (summing 64 products instantly) and the complex muxing logic needed to feed data to 64 multipliers simultaneously.
+
+* **IO Usage (28%) & FF (22%):** Input/Output (LEDs, UART) and Flip-Flop usage remains moderate, indicating that the design is primarily constrained by combinational logic and multipliers.
 
 -----
 
@@ -194,8 +196,6 @@ The design was synthesized for the Basys 3 (Artix-7 XC7A35T). The table below su
 
 This project is a functional proof-of-concept, but there is plenty of room to scale. Here is how we plan to evolve the design:
 
-* **Parallelism (Multi-MAC)**
-Currently, the design uses a single Multiply-Accumulate (MAC) unit, which processes one weight at a time. This sequential bottleneck is the main reason for the 13.68 ms latency. In the future, we plan to implement 4 or 8 parallel MAC units. This would allow the system to process multiple weights simultaneously, linearly reducing the latency by 4x or 8x. This improvement is crucial if we want to process larger images or run the network at higher frame rates.
 
 * **Pipelining**
 In the current architecture, Layer 2 (Hidden $\to$ Output) sits idle until Layer 1 (Input $\to$ Hidden) has completely finished processing all neurons. Future iterations will introduce pipelining, allowing Layer 2 to begin processing the first neuron as soon as Layer 1 finishes it. This overlapping of execution stages would significantly increase the throughput of the system without requiring additional logic resources.
