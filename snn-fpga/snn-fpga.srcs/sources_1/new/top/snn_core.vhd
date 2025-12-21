@@ -61,10 +61,11 @@ begin
     -- instantiate fc1: pass package weights/bias as generics
     fc1_inst : entity work.fc_layer_seq(rtl)
         generic map (
-            WEIGHTS_G => W_INPUT_HIDDEN,
-            BIAS_G    => B_INPUT_HIDDEN,
-            N_IN_G    => N_INPUTS,
-            N_OUT_G   => N_HIDDEN
+            WEIGHTS_G     => W_INPUT_HIDDEN,
+            BIAS_G        => B_INPUT_HIDDEN,
+            N_IN_G        => N_INPUTS,
+            N_OUT_G       => N_HIDDEN,
+            PARALLELISM_G => 64
         )
         port map (
             clk   => clk,
@@ -87,10 +88,11 @@ begin
     -- instantiate fc2: hidden->output (pass different weights)
     fc2_inst : entity work.fc_layer_seq(rtl)
         generic map (
-            WEIGHTS_G => W_HIDDEN_OUTPUT,
-            BIAS_G    => B_HIDDEN_OUTPUT,
-            N_IN_G    => N_HIDDEN,
-            N_OUT_G   => N_OUTPUT
+            WEIGHTS_G     => W_HIDDEN_OUTPUT,
+            BIAS_G        => B_HIDDEN_OUTPUT,
+            N_IN_G        => N_HIDDEN,
+            N_OUT_G       => N_OUTPUT,
+            PARALLELISM_G => 64
         )
         port map (
             clk   => clk,

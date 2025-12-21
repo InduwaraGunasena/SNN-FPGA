@@ -242,22 +242,29 @@ def sender_thread_fn():
                     ack = ser.read(1)
                     
                     if ack == ACK_BYTE:
-                        # 5. Wait for Prediction (It follows the ACK)
-                        # Give it a small timeout in case SNN takes time
-                        pred_byte = ser.read(1)
+                        # 5. Wait for Prediction (4 Bytes: [Pred] [LatHi] [LatMid] [LatLo])
+                        response = ser.read(4)
 
-                        # STOP TIMER
+                        # STOP TIMER (Total Round Trip)
                         end_time = time.time()
-                        latency_ms = (end_time - start_time) * 1000
+                        total_latency_ms = (end_time - start_time) * 1000
                         
-                        if len(pred_byte) > 0:
-                            pred_val = int(pred_byte[0])
+                        if len(response) == 4:
+                            pred_val = int(response[0])
+                            
+                            # Reconstruct 24-bit cycle count
+                            lat_cycles = (response[1] << 16) | (response[2] << 8) | response[3]
+                            
+                            # HW Time = Cycles * 40ns (1/25MHz) * 1000 (to get ms)
+                            # = Cycles * 0.00004
+                            hw_time_ms = lat_cycles * 0.00004
+                            
                             # SUCCESS: Update Prediction Label
                             root.after(0, lambda: lbl_pred.config(text=f"Prediction: {pred_val}", fg="green"))
-                            root.after(0, lambda: lbl_time.config(text=f"Latency: {latency_ms:.1f} ms"))
-                            print(f"Success. Pred: {pred_val}")
+                            root.after(0, lambda: lbl_time.config(text=f"HW Time: {hw_time_ms:.3f} ms\n(Total Round Trip: {total_latency_ms:.1f} ms)"))
+                            print(f"Success. Pred: {pred_val}, HW Cycles: {lat_cycles}, HW Time: {hw_time_ms:.3f}ms")
                         else:
-                            root.after(0, lambda: lbl_pred.config(text="Prediction: Timeout", fg="orange"))
+                            root.after(0, lambda: lbl_pred.config(text="Prediction: Timeout/Partial", fg="orange"))
                             
                     elif ack == NAK_BYTE:
                         root.after(0, lambda: lbl_pred.config(text="Error: Checksum NAK", fg="red"))

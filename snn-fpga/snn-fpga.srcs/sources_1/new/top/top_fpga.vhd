@@ -38,7 +38,8 @@ architecture rtl of top_fpga is
     signal pred_tx_start  : std_logic := '0';
     
     -- Control FSM
-    type t_ctrl_state is (IDLE, ASSERT_RESET, START_INFER, WAIT_STABLE, WAIT_DONE, SEND_RESULT);
+    type t_ctrl_state is (IDLE, ASSERT_RESET, WAIT_STABLE, START_INFER, WAIT_DONE, 
+                          SEND_PRED, WAIT_TX1, SEND_LAT_HI, WAIT_TX2, SEND_LAT_MID, WAIT_TX3, SEND_LAT_LO);
     signal ctrl_state : t_ctrl_state := IDLE;
         
     -- Display signals
@@ -47,6 +48,13 @@ architecture rtl of top_fpga is
     -- Debug / Visibility
     signal led_done_toggle : std_logic := '0';
     signal input_checksum  : unsigned(7 downto 0) := (others => '0');
+
+    -- LATENCY MEASUREMENT
+    signal latency_cnt    : unsigned(23 downto 0) := (others => '0');
+    signal saved_latency  : unsigned(23 downto 0) := (others => '0');
+    signal tx_wait_cnt    : integer range 0 to 4095 := 0; 
+    -- 2500 cycles @ 25MHz = 100us (plenty for 115200 baud char which is ~87us)
+    constant TX_DELAY     : integer := 2600; 
 
 begin
 
@@ -93,6 +101,7 @@ begin
                     start_inf <= '0';
                     core_rst  <= '0'; 
                     pred_tx_start <= '0'; -- Ensure Low
+                    latency_cnt <= (others => '0'); -- Reset counter
 
                     if uart_valid = '1' then
                         -- 1. Unpack data immediately
@@ -138,20 +147,71 @@ begin
                     -- Release Reset, Trigger Start
                     core_rst <= '0';
                     start_inf <= '1';
+                    latency_cnt <= latency_cnt + 1; -- Start counting
                     ctrl_state <= WAIT_DONE;
 
                 when WAIT_DONE =>
                     start_inf <= '0';
-                    if inf_done = '1' then
+                    -- Keep counting until done signal goes high
+                    if inf_done = '0' then
+                        latency_cnt <= latency_cnt + 1;
+                    else
+                        -- DONE!
+                        saved_latency <= latency_cnt; -- Save value
                         led_done_toggle <= not led_done_toggle;
-                        ctrl_state <= SEND_RESULT;
+                        ctrl_state <= SEND_PRED;
                     end if;
                     
-                -- Send the result byte via UART
-                when SEND_RESULT =>
+                -- PROTOCOL: Send 4 bytes: [PRED] [HI] [MID] [LO]
+                -- Each byte needs a delay before the next one because our UART buffer is small (1 byte)
+                
+                when SEND_PRED =>
                     pred_tx_data  <= std_logic_vector(to_unsigned(result, 8));
-                    pred_tx_start <= '1'; -- Pulse start
-                    ctrl_state <= IDLE;   -- Return to IDLE (pulse lasts 1 cycle, which is perfect)
+                    pred_tx_start <= '1'; 
+                    tx_wait_cnt   <= 0;
+                    ctrl_state    <= WAIT_TX1;
+
+                when WAIT_TX1 =>
+                    pred_tx_start <= '0'; -- Clear pulse
+                    if tx_wait_cnt < TX_DELAY then
+                        tx_wait_cnt <= tx_wait_cnt + 1;
+                    else
+                        ctrl_state <= SEND_LAT_HI;
+                    end if;
+
+                when SEND_LAT_HI =>
+                    pred_tx_data  <= std_logic_vector(saved_latency(23 downto 16));
+                    pred_tx_start <= '1';
+                    tx_wait_cnt   <= 0;
+                    ctrl_state    <= WAIT_TX2;
+
+                when WAIT_TX2 =>
+                    pred_tx_start <= '0';
+                    if tx_wait_cnt < TX_DELAY then
+                        tx_wait_cnt <= tx_wait_cnt + 1;
+                    else
+                        ctrl_state <= SEND_LAT_MID;
+                    end if;
+
+                when SEND_LAT_MID =>
+                    pred_tx_data  <= std_logic_vector(saved_latency(15 downto 8));
+                    pred_tx_start <= '1';
+                    tx_wait_cnt   <= 0;
+                    ctrl_state    <= WAIT_TX3;
+
+                when WAIT_TX3 =>
+                    pred_tx_start <= '0';
+                    if tx_wait_cnt < TX_DELAY then
+                        tx_wait_cnt <= tx_wait_cnt + 1;
+                    else
+                        ctrl_state <= SEND_LAT_LO;
+                    end if;  
+
+                when SEND_LAT_LO =>
+                    pred_tx_data  <= std_logic_vector(saved_latency(7 downto 0));
+                    pred_tx_start <= '1';
+                    ctrl_state    <= IDLE; -- Finished sequence
+
             end case;
         end if;
     end process;

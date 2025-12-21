@@ -7,10 +7,11 @@ use work.weights_pkg.all;
 
 entity fc_layer_seq is
     generic(
-        WEIGHTS_G : int_matrix_t;
-        BIAS_G    : int_vector_t;
-        N_IN_G    : integer;
-        N_OUT_G   : integer
+        WEIGHTS_G     : int_matrix_t;
+        BIAS_G        : int_vector_t;
+        N_IN_G        : integer;
+        N_OUT_G       : integer;
+        PARALLELISM_G : integer := 64  -- Default to 64 parallel MACs
     );
     port(
         clk   : in  std_logic;
@@ -32,6 +33,7 @@ architecture rtl of fc_layer_seq is
 begin
 
     process(clk)
+        variable v_sum : integer;
     begin
         if rising_edge(clk) then
             if rst = '1' then
@@ -40,7 +42,7 @@ begin
                 row_idx <= 0;
                 col_idx <= 0;
                 acc     <= 0;
-                z_out   <= (others => 0); -- Safe init
+                z_out   <= (others => 0); 
             else
                 case state is
                     when IDLE =>
@@ -53,19 +55,28 @@ begin
                         end if;
 
                     when COMPUTE_ACC =>
-                        -- Accumulate RAW products (No division here!)
-                        -- This matches Python: (W @ x)
-                        if col_idx < N_IN_G then
-                            acc <= acc + (WEIGHTS_G(row_idx, col_idx) * x_in(col_idx));
-                            col_idx <= col_idx + 1;
-                        else
+                        -- PARALLEL MAC IMPLEMENTATION
+                        -- We compute 'PARALLELISM_G' products in one cycle
+                        v_sum := 0;
+                        
+                        -- Loop unrolling (Synthesis will parallelize this into an adder tree)
+                        for k in 0 to PARALLELISM_G-1 loop
+                            if (col_idx + k) < N_IN_G then
+                                v_sum := v_sum + (WEIGHTS_G(row_idx, col_idx + k) * x_in(col_idx + k));
+                            end if;
+                        end loop;
+                        
+                        acc <= acc + v_sum;
+                        
+                        -- Check for end of row
+                        if (col_idx + PARALLELISM_G) >= N_IN_G then
                             state <= WRITE_RESULT;
+                        else
+                            col_idx <= col_idx + PARALLELISM_G;
                         end if;
 
                     when WRITE_RESULT =>
-                        -- Apply Division/Scaling HERE, once per neuron.
-                        -- Use shift_right (Arithmetic Shift) to perform floor division for negative numbers
-                        -- Formula: (acc // 256) + bias
+                        -- Validation Scale + Bias
                         z_out(row_idx) <= to_integer(shift_right(to_signed(acc, 32), 8)) + BIAS_G(row_idx);
 
                         if row_idx = N_OUT_G - 1 then
@@ -79,7 +90,6 @@ begin
 
                     when FINISHED =>
                         done <= '1';
-                        -- Wait for start signal to drop (handshake) or auto-reset
                         state <= IDLE;
                         
                 end case;
