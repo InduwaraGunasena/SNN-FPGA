@@ -200,11 +200,11 @@ The design was synthesized for the Basys 3 (Artix-7 XC7A35T). The table below su
 
 The timing report confirms that the design operates reliably at the target frequency of **25 MHz**.
 
-*   **Worst Negative Slack (WNS): +7.984 ns**
+*   **Worst Negative Slack (WNS): +8.429 ns**
     *   This is the most critical metric. A positive WNS of ~8 ns means the signal arrives comfortably before the next clock edge.
     *   Since our clock period is 40 ns (25 MHz), this large margin indicates we could theoretically run the design even faster (up to ~31 MHz) without errors.
 
-*   **Worst Hold Slack (WHS): +0.492 ns**
+*   **Worst Hold Slack (WHS): +0.393 ns**
     *   This confirms that signals do not change too quickly, preventing race conditions where data might pass through a flip-flop before it's safely latched.
     *   Zero failing endpoints across both Setup and Hold checks certifies the hardware stability.
 
