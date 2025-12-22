@@ -152,20 +152,22 @@ We evaluate performance based on the clock cycles needed for one full inference 
 
 ### Resource & Latency
 
-Since we serialize the math (using one multiplier per layer), the cycle count is deterministic:
+With the implementation of **64-way Parallelism**, the math is parallelized (using 64 DSP slices), drastically reducing the cycle count:
 
-  * **FC1 Layer:** $64 \text{ neurons} \times 256 \text{ inputs} = 16,384 \text{ cycles}$
-  * **FC2 Layer:** $10 \text{ neurons} \times 64 \text{ inputs} = 640 \text{ cycles}$
-  * **Overhead:** $\approx 74 \text{ cycles}$ for neuron updates.
+  * **FC1 Layer:** $64 \text{ neurons} \times (256 \text{ inputs} / 64) = 256 \text{ cycles}$
+  * **FC2 Layer:** $10 \text{ neurons} \times (64 \text{ inputs} / 64) = 10 \text{ cycles}$
+  * **LIF & Overhead:** $\approx 160 \text{ cycles}$ per step.
 
-**Total per Time Step:** $\approx 17,098 \text{ cycles}$
-**Total per Inference (20 Steps):** $\approx 341,960 \text{ cycles}$
+**Total per Time Step:** $\approx 426 \text{ cycles}$
+**Total per Inference (20 Steps):** $\approx 8,525 \text{ cycles}$
 
 ### Latency Calculation
 
 Running on a system clock of **25 MHz**:
 
-$$\text{Latency} = \frac{341,960}{25 \times 10^6} \approx \mathbf{13.68 \text{ ms}}$$
+$$\text{Latency} = \frac{8,525}{25 \times 10^6} \approx \mathbf{0.341 \text{ ms}}$$
+
+This represents a **40x speedup** over the sequential design (13.68 ms). The inference is effectively instantaneous.
 
 This results in \~73 predictions per second. For a human writing digits on a screen, this is effectively instantaneous.
 
@@ -179,14 +181,44 @@ This results in \~73 predictions per second. For a human writing digits on a scr
 The design was synthesized for the Basys 3 (Artix-7 XC7A35T). The table below summarizes the post-implementation resource utilization:
 
 <p align="center">
-<img src="/images/model summary.png" alt="Model summary" width="500"/>
+<img src="/images/Resource_Utilization.jpg" alt="Model summary" width="600"/>
 <br>
 <sub>Figure: SNN Model summary</sub>
 </p>
 
-* LUT(Look-Up Tables) Usage (35.5%): This is our primary constraint. Since we store the model weights in distributed ROM (logic slices) rather than dedicated Block RAM, the LUT usage is relatively high. This simplifies memory access but limits the maximum size of the network we can fit on this specific chip.
+* **DSP (Digital Signal Processors) Usage (96%):** This is the most critical change. We have implemented **64 Parallel MAC units**, which consumes almost every available DSP slice on the Artix-7 chip. This massive parallelism allows us to process 64 weights per clock cycle, drastically reducing latency but pushing the hardware to its arithmetic limit.
 
-* DSP(Digital Signal Processors) Usage (11.1%): We only consume 10 DSP slices because our sequential design efficiently reuses the same multipliers for every neuron. A fully parallel design would likely exhaust these DSPs, but our approach leaves plenty of room for future arithmetic expansions.
+* **LUT (Look-Up Tables) Usage (76%):** The utilization has increased significantly compared to the sequential version. This is required to support the parallel adder trees (summing 64 products instantly) and the complex muxing logic needed to feed data to 64 multipliers simultaneously.
+
+* **IO Usage (28%) & FF (22%):** Input/Output (LEDs, UART) and Flip-Flop usage remains moderate, indicating that the design is primarily constrained by combinational logic and multipliers.
+
+### Timing Analysis
+
+<p align="center">
+<img src="/images/Design_Timing _Summary.jpg" alt="Design Timing Summary" width="800"/>
+<br>
+<sub>Figure: Post-Implementation Timing Summary</sub>
+</p>
+
+The timing report confirms that the design operates reliably at the target frequency of **25 MHz**.
+
+*   **Worst Negative Slack (WNS): +8.429 ns**
+    *   This is the most critical metric. A positive WNS of ~8 ns means the signal arrives comfortably before the next clock edge.
+    *   Since our clock period is 40 ns (25 MHz), this large margin indicates we could theoretically run the design even faster (up to ~31 MHz) without errors.
+
+*   **Worst Hold Slack (WHS): +0.393 ns**
+    *   This confirms that signals do not change too quickly, preventing race conditions where data might pass through a flip-flop before it's safely latched.
+    *   Zero failing endpoints across both Setup and Hold checks certifies the hardware stability.
+
+### Physical Layout
+
+<p align="center">
+<img src="/images/Implemented_Design.jpeg" alt="Implemented Design Floorplan" width="600"/>
+<br>
+<sub>Figure: Physical Floorplan of the Implementation</sub>
+</p>
+
+The image above shows the actual physical layout of the design on the Artix-7 FPGA. The densely packed regions (teal/green) represent the Slice Logic (LUTs and FFs) used for the neural network computations, while the specific rectangular blocks correspond to the DSP slices utilized for the parallel Multiply-Accumulate operations. 
 
 -----
 
@@ -194,8 +226,6 @@ The design was synthesized for the Basys 3 (Artix-7 XC7A35T). The table below su
 
 This project is a functional proof-of-concept, but there is plenty of room to scale. Here is how we plan to evolve the design:
 
-* **Parallelism (Multi-MAC)**
-Currently, the design uses a single Multiply-Accumulate (MAC) unit, which processes one weight at a time. This sequential bottleneck is the main reason for the 13.68 ms latency. In the future, we plan to implement 4 or 8 parallel MAC units. This would allow the system to process multiple weights simultaneously, linearly reducing the latency by 4x or 8x. This improvement is crucial if we want to process larger images or run the network at higher frame rates.
 
 * **Pipelining**
 In the current architecture, Layer 2 (Hidden $\to$ Output) sits idle until Layer 1 (Input $\to$ Hidden) has completely finished processing all neurons. Future iterations will introduce pipelining, allowing Layer 2 to begin processing the first neuron as soon as Layer 1 finishes it. This overlapping of execution stages would significantly increase the throughput of the system without requiring additional logic resources.
